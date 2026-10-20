@@ -1,0 +1,18 @@
+packages:
+  - "apps/*"
+  - "servers/*"
+  - "packages/*"
+  - "prebuilt/*"
+  - "prebuilt/*/*"
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+
+audit:
+  level: high
+
+minimumReleaseAgeExclude:
+  - source-map-js@1.2.2
+  - sharp@0.35.5
+  - '@modelcontextprotocol/sdk@1.31.0'

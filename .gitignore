@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+.repo-cache/
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.test-tmp-*/
