@@ -1,0 +1,9 @@
+export {
+  DIRECT_CONVERSATIONS_COLLECTION,
+  DIRECT_CONVERSATIONS_COLLECTION_VALIDATOR,
+  DIRECT_CONVERSATIONS_INDEXES,
+  DIRECT_MESSAGES_COLLECTION,
+  DIRECT_MESSAGES_COLLECTION_VALIDATOR,
+  DIRECT_MESSAGES_INDEXES
+} from "./direct-message.model.js";
+export type { DirectConversationDocument, DirectMessageDocument } from "./direct-message.model.js";

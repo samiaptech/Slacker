@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import HomePage from "../../app/(public)/page";
 
-test("composes environment-derived API configuration into the health action", () => {
+test("composes environment-derived API configuration into the workspace boundary", () => {
   process.env.NEXT_PUBLIC_API_BASE_URL = "https://api.example.test";
   const markup = renderToStaticMarkup(<HomePage />);
-  assert.match(markup, /The application foundation is running/);
-  assert.match(markup, /href="https:\/\/api\.example\.test\/health"/);
+  assert.match(markup, /Loading your workspaces/);
+  assert.match(markup, /max-w-none/);
 });

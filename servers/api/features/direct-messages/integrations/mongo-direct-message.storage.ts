@@ -1,0 +1,193 @@
+import { isDeepStrictEqual } from "node:util";
+import type { MongoDatabase, MongoTransaction } from "../../../integrations/mongodb/index.js";
+import {
+  DIRECT_CONVERSATIONS_COLLECTION,
+  DIRECT_CONVERSATIONS_COLLECTION_VALIDATOR,
+  DIRECT_CONVERSATIONS_INDEXES,
+  DIRECT_MESSAGES_COLLECTION,
+  DIRECT_MESSAGES_COLLECTION_VALIDATOR,
+  DIRECT_MESSAGES_INDEXES,
+  type DirectConversationDocument,
+  type DirectMessageDocument
+} from "../models/index.js";
+import type { DirectMessageStorage } from "../repositories/index.js";
+
+const storageUnavailable = Object.assign(new Error("Direct message storage is unavailable."), {
+  kind: "direct-message-storage-unavailable" as const
+});
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+const isCollectionAlreadyExists = (error: unknown): boolean => isRecord(error) && error.code === 48;
+const isDuplicateKey = (error: unknown): boolean => isRecord(error) && error.code === 11000;
+const isUnsupportedTransaction = (error: unknown): boolean =>
+  isRecord(error) && (error.code === 20 || error.code === 26 || error.code === 303);
+
+const ensureCollection = async (
+  database: MongoDatabase,
+  name: string,
+  validator: unknown
+): Promise<void> => {
+  try {
+    await database.createCollection(name, {
+      validator: validator as never,
+      validationLevel: "strict",
+      validationAction: "error"
+    });
+  } catch (error: unknown) {
+    if (!isCollectionAlreadyExists(error)) throw error;
+    await database.command({
+      collMod: name,
+      validator: validator as never,
+      validationLevel: "strict",
+      validationAction: "error"
+    });
+  }
+};
+
+const assertCollection = async (
+  database: MongoDatabase,
+  collection: Readonly<{
+    name: string;
+    validator: unknown;
+    indexes: readonly Readonly<{ keys: unknown; options: Readonly<{ name: string; unique: boolean }> }>[];
+    readIndexes: () => Promise<readonly Readonly<{ name?: string; key: unknown; unique?: boolean }>[]>;
+  }>
+): Promise<void> => {
+  const metadata = await database.listCollections({ name: collection.name }).next();
+  const options = isRecord(metadata) && "options" in metadata ? metadata.options : undefined;
+  if (!isRecord(options) || !isDeepStrictEqual(options.validator, collection.validator)) {
+    throw storageUnavailable;
+  }
+  const actualIndexes = await collection.readIndexes();
+  for (const expected of collection.indexes) {
+    const actual = actualIndexes.find(({ name }) => name === expected.options.name);
+    if (!actual || !isDeepStrictEqual(actual.key, expected.keys)
+      || Boolean(actual.unique) !== expected.options.unique) {
+      throw storageUnavailable;
+    }
+  }
+};
+
+export const createMongoDirectMessageStorage = (
+  database: MongoDatabase,
+  withTransaction: MongoTransaction
+): DirectMessageStorage => {
+  const conversations = database.collection<DirectConversationDocument>(DIRECT_CONVERSATIONS_COLLECTION);
+  const messages = database.collection<DirectMessageDocument>(DIRECT_MESSAGES_COLLECTION);
+  const ensureReady = async (): Promise<void> => {
+    try {
+      await Promise.all([
+        assertCollection(database, {
+          name: DIRECT_CONVERSATIONS_COLLECTION,
+          validator: DIRECT_CONVERSATIONS_COLLECTION_VALIDATOR,
+          indexes: DIRECT_CONVERSATIONS_INDEXES,
+          readIndexes: () => conversations.indexes()
+        }),
+        assertCollection(database, {
+          name: DIRECT_MESSAGES_COLLECTION,
+          validator: DIRECT_MESSAGES_COLLECTION_VALIDATOR,
+          indexes: DIRECT_MESSAGES_INDEXES,
+          readIndexes: () => messages.indexes()
+        })
+      ]);
+    } catch (error: unknown) {
+      if (isUnsupportedTransaction(error)) throw storageUnavailable;
+      throw error;
+    }
+  };
+  return Object.freeze({
+    initialize: async (): Promise<void> => {
+      await ensureCollection(database, DIRECT_CONVERSATIONS_COLLECTION, DIRECT_CONVERSATIONS_COLLECTION_VALIDATOR);
+      await ensureCollection(database, DIRECT_MESSAGES_COLLECTION, DIRECT_MESSAGES_COLLECTION_VALIDATOR);
+      for (const index of DIRECT_CONVERSATIONS_INDEXES) {
+        await conversations.createIndex(index.keys, index.options);
+      }
+      for (const index of DIRECT_MESSAGES_INDEXES) {
+        await messages.createIndex(index.keys, index.options);
+      }
+    },
+    openForMember: async (workspaceId, draft) => {
+      await ensureReady();
+      try {
+        return await withTransaction(async (session) => {
+          const existing = await conversations.findOne(
+            { workspaceId, pairKey: draft.pairKey },
+            { session }
+          );
+          if (existing) return Object.freeze({ kind: "opened" as const, conversation: existing, created: false });
+          await conversations.insertOne(draft, { session });
+          return Object.freeze({ kind: "opened" as const, conversation: draft, created: true });
+        });
+      } catch (error: unknown) {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        if (!isDuplicateKey(error)) throw error;
+        const existing = await conversations.findOne({ workspaceId, pairKey: draft.pairKey });
+        if (!existing) throw error;
+        return Object.freeze({ kind: "opened" as const, conversation: existing, created: false });
+      }
+    },
+    listForMember: async (workspaceId, userId) => {
+      await ensureReady();
+      return conversations.find({ workspaceId, participantIds: userId })
+        .sort({ lastActivityAt: -1, _id: -1 })
+        .limit(50)
+        .toArray();
+    },
+    findForMember: async (workspaceId, conversationId, userId) => {
+      await ensureReady();
+      return conversations.findOne({
+        _id: conversationId,
+        workspaceId,
+        participantIds: userId
+      });
+    },
+    listMessagesForMember: async (workspaceId, conversationId, userId, query) => {
+      await ensureReady();
+      return withTransaction(async (session) => {
+        const conversation = await conversations.findOne({
+          _id: conversationId,
+          workspaceId,
+          participantIds: userId
+        }, { session });
+        if (!conversation) return null;
+        const filter = query.before
+          ? {
+            workspaceId,
+            conversationId,
+            $or: [
+              { createdAt: { $lt: query.before.createdAt } },
+              { createdAt: query.before.createdAt, _id: { $lt: query.before.id } }
+            ]
+          }
+          : { workspaceId, conversationId };
+        const page = await messages.find(filter, { session })
+          .sort({ createdAt: -1, _id: -1 })
+          .limit(query.pageSize + 1)
+          .toArray();
+        return Object.freeze(page);
+      }).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      });
+    },
+    createMessageForMember: async (workspaceId, conversationId, userId, message) => {
+      await ensureReady();
+      try {
+        return await withTransaction(async (session) => {
+          const conversation = await conversations.updateOne(
+            { _id: conversationId, workspaceId, participantIds: userId },
+            { $max: { lastActivityAt: message.createdAt } },
+            { session }
+          );
+          if (conversation.matchedCount === 0) return false;
+          await messages.insertOne(message, { session });
+          return true;
+        });
+      } catch (error: unknown) {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      }
+    }
+  });
+};

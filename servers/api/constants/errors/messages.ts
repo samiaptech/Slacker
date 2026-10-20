@@ -1,5 +1,17 @@
 export const ERROR_MESSAGES = Object.freeze({
   internal: "An unexpected error occurred.",
   routeNotFound: "Route was not found.",
-  validation: "Request validation failed."
+  validation: "Request validation failed.",
+  unauthenticated: "Sign in to access this workspace.",
+  workspaceAccessDenied: "This account is not a member of the selected workspace.",
+  workspaceStorageUnavailable: "Workspace storage is temporarily unavailable.",
+  workspaceMembershipConflict: "A workspace must have at least one administrator.",
+  channelNameConflict: "A channel with this name already exists in the workspace.",
+  idempotencyKeyReused: "This idempotency key was already used for a different request.",
+  channelStorageUnavailable: "Channel storage is temporarily unavailable.",
+  channelJoinNotAllowed: "Only active public channels can be joined.",
+  channelMembershipConflict: "This membership change is not allowed.",
+  channelUnavailable: "The channel is unavailable or you do not have access.",
+  directMessageUnavailable: "The direct conversation is unavailable or you do not have access.",
+  directMessageStorageUnavailable: "Direct message storage is temporarily unavailable."
 } as const);

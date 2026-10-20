@@ -72,19 +72,23 @@ GIT GOVERNANCE RECONCILIATION: 2026-09-18
 - M03.4 workspace discovery and the dependency graph remain valid and acyclic. Architecture checks, lint, strict type checking, production builds, 56 control-plane tests, and 17 workspace tests pass; the pinned shadcn CLI resolves the package-owned theme and all 53 installed registry components.
 - The security scanner reconciliation passes a clean managed TruffleHog scan, normalized JSON output, aggregate validation, checksum, cached-binary integrity, and version enforcement, a generated-credential integration test, 71 control-plane tests, all 17 workspace tests, lint, strict type checking, and every production build.
 - Git governance contract tests cover valid, invalid, malformed, missing-subject, and breaking Conventional Commits; staged-only processing and command failure; hook thinness; workspace ESLint routing; immutable CI actions; pull request structure; CODEOWNERS; and the versioned ruleset policy. Repository-wide validation remains the authoritative CI path.
+- Release 1 workspace onboarding and channel-management validation passes: affected API/web/UI/logging tests, typechecks, ESLint tasks, and production builds all pass; repository architecture checks report no issues. The API suite covers multiple workspaces, authorization by selected membership, admin-created seven-day reusable invite links, post-sign-in acceptance, and the legacy-role migration policy. No live Atlas connection or migration was run.
 
 ## Deferred
 
-- A required live MongoDB connection, feature repositories, models, and live-provider integration coverage remain deferred until a persistence-backed feature exists.
+- Live MongoDB/Atlas migration, workspace and channel transaction behavior, and production account mapping remain unverified; the persistence features are implemented, but no configured live database was used here.
+- Socket authorization and membership-revocation parity remain deferred until a real-time transport exists.
 - Remote artifact storage, distributed execution, deployment-specific standalone web packaging, and production observability infrastructure remain deferred until operational requirements justify them.
 - Applying `.github/rulesets/main.json` to GitHub remains an authenticated repository-administrator action; the current environment has no authenticated GitHub CLI session.
 
 ## Not applicable
 
-- Authentication, users, sessions, and authorization are outside M03.2 and were not introduced.
+- Authentication and workspace authorization are application capabilities: verified Google identities may sign in, and workspace membership is checked server-side for workspace-scoped requests.
 - `packages/validation` is not justified because current environment schemas are runtime-specific and not shared.
 - Additional feature, form, navigation, persistence, or infrastructure folder hierarchies are not justified by current source responsibilities.
 
-## Next milestone
+## Release 1 application progress
 
-M03.3 - Auth Vertical Slice Design. Authentication is not implemented in the current workspace.
+Multi-workspace onboarding is implemented: any verified Google account can sign in without a global email allowlist, create multiple workspaces, switch between memberships, and join another workspace through a reusable seven-day administrator invite link. Invite tokens are hashed at rest, acceptance is idempotent, and channel requests carry a selected workspace ID that the API verifies against current membership. The web flow supports creating a workspace, copying or skipping an invite link, and returning to an invitation after Google sign-in. Email delivery is not configured.
+
+Before development, configure the repository environment and start the MongoDB replica set or sharded cluster, then run `pnpm run initialize` from the repository root. This launcher runs workspace, channel, and direct-message initializers in dependency order and stops if any initializer fails. Preserve legacy workspace environment values as the documented `LEGACY_WORKSPACE_*` variables during a one-time migration. No live database migration or account mapping was verified. Release 1 Epic A stories A2-A4 remain in progress where live database, interaction-level UI, or not-yet-built socket/history surfaces still require validation.

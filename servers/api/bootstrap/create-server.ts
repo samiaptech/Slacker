@@ -25,6 +25,10 @@ export const createServer = ({ app, config, logger }: ServerDependencies): ApiSe
       });
     }),
     stop: () => new Promise<void>((resolve, reject) => {
+      if (!server.listening) {
+        resolve();
+        return;
+      }
       server.close((error) => {
         if (error) reject(error);
         else resolve();

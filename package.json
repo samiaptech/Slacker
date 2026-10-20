@@ -10,6 +10,7 @@
     "tasks": "node codebase/cli/repo.mjs tasks",
     "affected": "node codebase/cli/repo.mjs affected",
     "dev": "node codebase/cli/repo.mjs run dev --concurrency 2",
+    "initialize": "pnpm --filter @workspace/api run workspaces:initialize && pnpm --filter @workspace/api run channels:initialize && pnpm --filter @workspace/api run direct-messages:initialize",
     "build": "node codebase/cli/repo.mjs build --concurrency 2",
     "repo:test": "node codebase/cli/repo.mjs test",
     "test:control-plane": "node --test codebase/**/*.test.mjs",

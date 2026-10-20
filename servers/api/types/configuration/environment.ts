@@ -8,6 +8,10 @@ export type ValidatedApiEnvironment = Readonly<{
   API_HOST: string;
   API_PORT: number;
   WEB_ORIGIN: string;
-  MONGODB_URI?: string | undefined;
+  MONGODB_URI: string;
+  BETTER_AUTH_URL: string;
+  BETTER_AUTH_SECRET: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
   LOG_LEVEL: LogLevel;
 }>;

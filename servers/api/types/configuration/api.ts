@@ -6,6 +6,10 @@ export type ApiConfig = Readonly<{
   host: string;
   port: number;
   webOrigin: string;
-  mongodbUri?: string;
+  mongodbUri: string;
+  betterAuthUrl: string;
+  betterAuthSecret: string;
+  googleClientId: string;
+  googleClientSecret: string;
   logLevel: LogLevel;
 }>;

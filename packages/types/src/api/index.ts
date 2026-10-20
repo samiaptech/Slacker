@@ -1,3 +1,35 @@
 export type { ApiEnvironment } from "./environment/index.js";
 export type { ApiErrorCode, ApiErrorDetails, ApiErrorResponse } from "./errors/index.js";
 export type { ApiHealthResponse } from "./health/index.js";
+export type { RealtimeClientEvents, RealtimeServerEvents } from "./realtime/index.js";
+export type {
+  DirectConversationListResponse,
+  DirectConversationResponse,
+  DirectMessageListResponse,
+  DirectMessageResponse
+} from "./direct-messages/index.js";
+export type {
+  ChannelCreateResponse,
+  ChannelJoinResponse,
+  ChannelListResponse,
+  ChannelMemberMutationResponse,
+  ChannelMemberResponse,
+  ChannelMembersResponse,
+  ChannelMembershipResponse,
+  ChannelResponse,
+  ChannelMessageListResponse,
+  ChannelMessageResponse
+} from "./channels/index.js";
+export type {
+  WorkspaceAccessResponse,
+  WorkspaceEmailVisibilityResponse,
+  WorkspaceInviteLinkResponse,
+  WorkspaceInvitationAcceptanceResponse,
+  WorkspaceListResponse,
+  WorkspaceMemberResponse,
+  WorkspaceMemberProfileResponse,
+  WorkspaceMemberRoleResponse,
+  WorkspaceMembersResponse,
+  WorkspaceMembershipSummary,
+  WorkspaceMutationResponse
+} from "./workspace/index.js";

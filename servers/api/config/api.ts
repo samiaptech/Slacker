@@ -5,6 +5,10 @@ export const createApiConfig = (environment: ValidatedApiEnvironment): ApiConfig
   host: environment.API_HOST,
   port: environment.API_PORT,
   webOrigin: environment.WEB_ORIGIN,
+  mongodbUri: environment.MONGODB_URI,
+  betterAuthUrl: environment.BETTER_AUTH_URL,
+  betterAuthSecret: environment.BETTER_AUTH_SECRET,
+  googleClientId: environment.GOOGLE_CLIENT_ID,
+  googleClientSecret: environment.GOOGLE_CLIENT_SECRET,
   logLevel: environment.LOG_LEVEL,
-  ...(environment.MONGODB_URI ? { mongodbUri: environment.MONGODB_URI } : {})
 });
