@@ -65,6 +65,8 @@ export const createSocketIoIntegration = ({
   return Object.freeze({
     io,
     attach: (server) => io.attach(server),
-    close: () => new Promise<void>((resolve) => io.close(() => resolve()))
+    close: async () => {
+      await io.close();
+    }
   });
 };

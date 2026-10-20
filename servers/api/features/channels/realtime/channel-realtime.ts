@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { Logger } from "@workspace/logging";
 import type { ChannelMessageResponse, RealtimeClientEvents, RealtimeServerEvents } from "@workspace/types";
+import type { Socket } from "socket.io";
 import type { SocketIoApi, AuthenticatedSocketData } from "../../../integrations/socket-io/index.js";
 import type { AuthenticationIdentity } from "../../../integrations/authentication/index.js";
 import type { ChannelService } from "../services/index.js";
 
-type ChannelSocket = import("socket.io").Socket<
+type ChannelSocket = Socket<
   RealtimeClientEvents,
   RealtimeServerEvents,
   Record<string, never>,
@@ -137,7 +138,9 @@ export const createChannelRealtime = ({
             online: true
           });
         }
-      })().catch((error: unknown) => reportFailure(socket, logger, "workspace:subscribe", error));
+      })().catch((error: unknown) => {
+        reportFailure(socket, logger, "workspace:subscribe", error);
+      });
     });
 
     socket.on("channel:subscribe", (requestedChannelId) => {
@@ -165,7 +168,9 @@ export const createChannelRealtime = ({
         }
         await socket.join(channelRoom(workspaceId, parsedChannelId.data));
         socket.emit("channel:ready", { channelId: parsedChannelId.data });
-      })().catch((error: unknown) => reportFailure(socket, logger, "channel:subscribe", error));
+      })().catch((error: unknown) => {
+        reportFailure(socket, logger, "channel:subscribe", error);
+      });
     });
 
     socket.on("channel:unsubscribe", (requestedChannelId) => {
@@ -222,14 +227,18 @@ export const createChannelRealtime = ({
           userId: socket.data.identity.id,
           active: parsed.data.active
         });
-      })().catch((error: unknown) => reportFailure(socket, logger, "channel:typing", error));
+      })().catch((error: unknown) => {
+        reportFailure(socket, logger, "channel:typing", error);
+      });
     });
 
     socket.on("disconnect", () => {
       const workspaceId = socket.data.workspaceId;
       if (workspaceId) {
         void removeWorkspacePresence(socket, workspaceId)
-          .catch((error: unknown) => reportFailure(socket, logger, "workspace:disconnect", error));
+          .catch((error: unknown) => {
+            reportFailure(socket, logger, "workspace:disconnect", error);
+          });
       }
     });
   });

@@ -16,7 +16,7 @@ const createTestSocket = (origin: string, identity: string): TestSocket =>
     extraHeaders: { Cookie: `session=${identity}` },
     reconnection: false,
     timeout: 2_000
-  }) as TestSocket;
+  });
 
 const waitForConnect = (socket: TestSocket): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -25,11 +25,15 @@ const waitForConnect = (socket: TestSocket): Promise<void> =>
   });
 
 const waitForWorkspaceReady = (socket: TestSocket): Promise<void> =>
-  new Promise((resolve) => socket.once("workspace:ready", resolve));
+  new Promise((resolve) => {
+    socket.once("workspace:ready", resolve);
+  });
 
 const waitForChannelReady = (socket: TestSocket, channelId: string): Promise<void> =>
   new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Channel subscription timed out.")), 2_000);
+    const timeout = setTimeout(() => {
+      reject(new Error("Channel subscription timed out."));
+    }, 2_000);
     socket.once("channel:ready", (payload) => {
       clearTimeout(timeout);
       if (payload.channelId === channelId) resolve();
@@ -38,7 +42,9 @@ const waitForChannelReady = (socket: TestSocket, channelId: string): Promise<voi
   });
 
 const waitForRealtimeError = (socket: TestSocket): Promise<Readonly<{ event: string; message: string }>> =>
-  new Promise((resolve) => socket.once("realtime:error", resolve));
+  new Promise((resolve) => {
+    socket.once("realtime:error", resolve);
+  });
 
 void test("authenticates sockets and scopes live channel events to workspace members", async () => {
   const logger: Logger = {
@@ -102,7 +108,7 @@ void test("authenticates sockets and scopes live channel events to workspace mem
   });
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
-  const origin = `http://127.0.0.1:${address.port}`;
+  const origin = `http://127.0.0.1:${address.port.toString()}`;
   const alice = createTestSocket(origin, "alice");
   const bob = createTestSocket(origin, "bob");
   const privateViewer = createTestSocket(origin, "workspace-member");
@@ -219,7 +225,7 @@ void test("rejects Socket.IO connections without an authenticated session", asyn
   });
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
-  const client = createClient(`http://127.0.0.1:${address.port}`, {
+  const client = createClient(`http://127.0.0.1:${address.port.toString()}`, {
     autoConnect: false,
     reconnection: false,
     timeout: 2_000

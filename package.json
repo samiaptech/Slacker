@@ -22,7 +22,7 @@
     "validate": "pnpm run node:check && node codebase/cli/repo.mjs validate && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
     "node:check": "node codebase/checks/node-syntax.mjs",
     "commitlint": "commitlint",
-    "lint:staged": "lint-staged",
+    "lint:staged": "lint-staged --concurrent false",
     "prepare": "husky",
     "ui:add": "pnpm --dir packages/ui run ui:add",
     "ui:add:all": "pnpm --dir packages/ui run ui:add:all",
