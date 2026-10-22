@@ -303,10 +303,12 @@ Updated: 2026-10-22.
   at committed path `servers/api/vercel/server.mjs` (~4 MB minified); `build:vercel`
   regenerates it from `server.mts`, and Vercel points to this existing entrypoint. Bundle
   contains only Node built-in imports; `dotenv/config` loads only outside Vercel. The
-  committed-entrypoint fix is being validated and is not pushed yet. API checks, 19 focused
-  tests, earlier bundle syntax/import inspection, dependency audit, and repository check
-  pass. **Next:** validate the committed bundle, push, redeploy, then verify `/health` and
-  `/workspaces`. Active web origin: `https://slacker-tifi.vercel.app`. Socket.IO WebSocket
+  committed-entrypoint fix was pushed to `samiaptech/Slacker:main` as `77743bb`. API
+  typecheck/lint, 19 focused tests, bundle syntax/import inspection, dependency audit,
+  secret scan, and repository check pass. **Next:** deploy commit `77743bb`; the configured
+  entrypoint now exists in the source checkout before build validation. Confirm Vercel runs
+  `build:vercel`, then verify `/health` and `/workspaces`. Active web origin:
+  `https://slacker-tifi.vercel.app`. Socket.IO WebSocket
   operation and cross-instance pub/sub on Vercel remain unverified; the search limiter is
   process-local. Do not use `pnpm run initialize` as a build/start command. Next.js is
   patched at 16.4.1 (`7214f5d`); revisit the `braces` advisory when patched.
