@@ -8,7 +8,7 @@
     "api": {
       "root": "servers/api",
       "framework": "express",
-      "installCommand": "pnpm install --filter @workspace/api..."
+      "installCommand": "pnpm install --filter @workspace/api... --node-linker=hoisted --frozen-lockfile"
     }
   },
   "rewrites": [

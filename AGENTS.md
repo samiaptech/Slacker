@@ -302,10 +302,13 @@ Updated: 2026-10-22.
   loads `dotenv/config` only outside Vercel; Vercel supplies environment variables itself,
   while local development retains `.env` support. The latest deployment could not resolve
   `express` from `/var/task/server.mjs`, indicating service runtime dependencies are
-  missing. `vercel.json` now configures an API-specific filtered pnpm install for
-  `@workspace/api` and its workspace dependencies. The filtered install, API typecheck,
-  build, lint, 19 focused tests, `.mjs` syntax check, dependency audit, and `git diff
-  --check` pass. This Vercel configuration fix is not yet committed or pushed.
+  missing. `vercel.json` configures a filtered pnpm install for `@workspace/api` and
+  workspace dependencies, using pnpm's hoisted `node_modules` layout to make packages
+  visible to Vercel's function packager. A local reinstall with the hoisted layout stalled
+  while downloading packages and was stopped; this exact install must be confirmed by the
+  Vercel build log. API typecheck/build/lint, 19 focused tests, `.mjs` syntax check,
+  dependency audit, and repository scan/check had passed previously. Commit and redeploy
+  the install-layout change, then verify `/health` and `/workspaces`.
   The dotenv fix was pushed as `7214f5d`, together with upgrading Next.js 16.3.8 to patched
   16.4.1 after the commit hook reported two critical and one high advisories. Earlier API
   checks, 19 focused tests, emitted `.mjs` syntax check, web typecheck, 20 tests, production
