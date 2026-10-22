@@ -297,20 +297,19 @@ Updated: 2026-10-22.
   `X-Workspace-Id` to distinguish channel API requests from Next.js channel pages. It was
   pushed to `samiaptech/Slacker:main` as `05ebe11`. Repeated Vercel runtime logs showed
   `ERR_MODULE_NOT_FOUND` for `express` from `/var/task/server.mjs`, even after ESM entrypoint
-  and filtered/hoisted pnpm install changes. The API now uses an esbuild-generated
-  self-contained ESM bundle (`dist/vercel/server.mjs`) as the configured Vercel service
-  entrypoint; its 8.1 MB output imports only Node built-ins. The server loads
-  `dotenv/config` only outside Vercel, preserving local `.env` support. The fix was pushed
-  to `samiaptech/Slacker:main` as `70cfa5f`. API typecheck/build/lint, 19 focused tests,
-  bundle syntax/import inspection, dependency audit, repository scan, and repository check
-  passed. **Next:** redeploy `main` at `70cfa5f`, inspect the API build output to confirm
-  `pnpm run build:vercel` and the configured bundle entrypoint are used, then verify
-  `/health` and `/workspaces`. Active web origin reported by user:
-  `https://slacker-tifi.vercel.app`. Socket.IO WebSocket operation and cross-instance
-  pub/sub on Vercel remain unverified; the search limiter is process-local. Do not use
-  `pnpm run initialize` as a build/start command; production DB initialization is a
-  deliberate one-time operation. Next.js was upgraded to patched 16.4.1 in `7214f5d`
-  after the audit found critical/high advisories. Revisit the `braces` advisory when patched.
+  and filtered/hoisted pnpm install changes. A self-contained esbuild bundle was configured
+  at `dist/vercel/server.mjs`, but Vercel validates the service entrypoint before running
+  the build command and rejected the missing file (`dist/` is ignored). The bundle now lives
+  at committed path `servers/api/vercel/server.mjs` (~4 MB minified); `build:vercel`
+  regenerates it from `server.mts`, and Vercel points to this existing entrypoint. Bundle
+  contains only Node built-in imports; `dotenv/config` loads only outside Vercel. The
+  committed-entrypoint fix is being validated and is not pushed yet. API checks, 19 focused
+  tests, earlier bundle syntax/import inspection, dependency audit, and repository check
+  pass. **Next:** validate the committed bundle, push, redeploy, then verify `/health` and
+  `/workspaces`. Active web origin: `https://slacker-tifi.vercel.app`. Socket.IO WebSocket
+  operation and cross-instance pub/sub on Vercel remain unverified; the search limiter is
+  process-local. Do not use `pnpm run initialize` as a build/start command. Next.js is
+  patched at 16.4.1 (`7214f5d`); revisit the `braces` advisory when patched.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`

@@ -8,7 +8,7 @@
     "api": {
       "root": "servers/api",
       "framework": "express",
-      "entrypoint": "dist/vercel/server.mjs",
+      "entrypoint": "vercel/server.mjs",
       "installCommand": "pnpm install --filter @workspace/api... --frozen-lockfile",
       "buildCommand": "pnpm run build:vercel"
     }
