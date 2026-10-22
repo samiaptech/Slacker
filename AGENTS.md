@@ -293,27 +293,21 @@ Updated: 2026-10-22.
   timing in a populated browser. Continue production UI decomposition where cohesive
   boundaries improve readability. User: confirm local web/API configuration uses localhost
   and restart both apps if it is stale. The user is preparing a Vercel production
-  deployment. Root `vercel.json` routes the `web` and `api` services on one domain, using
+  deployment. Root `vercel.json` routes `web` and `api` on one domain, using
   `X-Workspace-Id` to distinguish channel API requests from Next.js channel pages. It was
-  pushed to `samiaptech/Slacker:main` as `05ebe11`. The first Vercel build succeeded for
-  web but failed to detect the API Express entrypoint. The API entrypoint now directly
-  imports Express, injects the instance into `createApp`, exports the Express app as Vercel
-  documents, and only starts the wrapped HTTP/Socket.IO server for local development.
-  Focused API typecheck, ESLint, and 18 relevant tests passed; `git diff --check` passed.
-  Vercel runtime logs revealed that the emitted `server.js` is loaded as CommonJS despite
-  containing ESM imports (`SyntaxError: Cannot use import statement outside a module`).
-  The Express entrypoint is now `server.mts`, which Vercel recognizes as an ESM entrypoint
-  and emits as `server.mjs`; API dev/start scripts, TypeScript includes, and lint target
-  were updated accordingly. API typecheck/build, ESLint, 19 focused API tests, emitted
-  `dist/server.mjs` syntax check, and `git diff --check` passed. The Vercel runtime build
-  remains unverified; redeploy and check `/health` and `/workspaces`. The user's logs confirm
-  module format failure, not missing environment or MongoDB connectivity. The active web origin is
-  `https://slacker-liart.vercel.app`; `https://slacker.vercel.app` is no longer active.
-  Socket.IO WebSocket operation on Vercel and cross-instance pub/sub still need
-  verification; the search limiter is process-local. Do not use `pnpm run initialize` as a
-  build/start command; production database initialization is a deliberate one-time
-  operation. No commit or push was made. Revisit the `braces` advisory when a patched
-  release is available.
+  pushed to `samiaptech/Slacker:main` as `05ebe11`. Vercel runtime logs showed that its
+  Express entrypoint was first emitted as CommonJS `server.js` despite ESM imports; it is
+  now `server.mts` and Vercel emits `server.mjs`. The next deployment confirmed ESM loading
+  but failed because `dotenv` was missing from `/var/task`. The entrypoint now dynamically
+  loads `dotenv/config` only outside Vercel; Vercel supplies environment variables itself,
+  while local development retains `.env` support. API typecheck/build, lint, 19 focused
+  tests, emitted `dist/server.mjs` syntax check, and `git diff --check` pass. Push this
+  dotenv fix and redeploy, then verify `/health` and `/workspaces`. The current web origin
+  is `https://slacker-tifi.vercel.app`; previous Vercel deployment hostnames may no longer
+  be active. Socket.IO WebSocket operation and cross-instance pub/sub on Vercel remain
+  unverified; the search limiter is process-local. Do not use `pnpm run initialize` as a
+  build/start command; production DB initialization is a deliberate one-time operation.
+  Revisit the `braces` advisory when a patched release is available.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`

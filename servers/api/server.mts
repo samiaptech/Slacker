@@ -1,4 +1,3 @@
-import "dotenv/config";
 import express from "express";
 import { createLogger } from "@workspace/logging";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -33,6 +32,10 @@ import {
   createMessageSearchService,
   createMongoMessageSearchStorage
 } from "./features/message-search/index.js";
+
+const isVercelRuntime = process.env.VERCEL === "1";
+
+if (!isVercelRuntime) await import("dotenv/config");
 
 const config = createApiConfig(readApiEnvironment());
 const logger = createLogger({
@@ -160,8 +163,6 @@ const app = createApp({
 const server = createServer({ app, config, logger });
 socketIo.attach(server.raw);
 export default app;
-
-const isVercelRuntime = process.env.VERCEL === "1";
 
 if (!isVercelRuntime) {
   const shutdown = createShutdown({ database, logger, server, socketIo });
