@@ -1,2 +1,2 @@
-"# code_base_squid" 
-"# nutshyll" 
+# Slacker
+chatting mini app a workplace to chat
