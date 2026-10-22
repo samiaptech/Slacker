@@ -295,27 +295,22 @@ Updated: 2026-10-22.
   and restart both apps if it is stale. The user is preparing a Vercel production
   deployment. Root `vercel.json` routes `web` and `api` on one domain, using
   `X-Workspace-Id` to distinguish channel API requests from Next.js channel pages. It was
-  pushed to `samiaptech/Slacker:main` as `05ebe11`.   Vercel runtime logs showed its initial ESM fix then failed to resolve `dotenv`, followed
-  by repeated `ERR_MODULE_NOT_FOUND` for `express` from `/var/task/server.mjs` despite
-  filtered and hoisted pnpm installs. The API service now explicitly builds a self-contained
-  ESM bundle with esbuild (`dist/vercel/server.mjs`) and configures that output as the
-  service entrypoint; the bundle is 8.1 MB and its only external imports are Node built-ins.
-  The API entrypoint loads `dotenv/config` only outside Vercel, preserving local `.env`
-  support. API typecheck/build/lint, 19 focused tests, bundle syntax check, dependency
-  audit, and repository scan/check pass. **Next:** push this bundle change and redeploy;
-  confirm the API function starts, then verify `/health` and `/workspaces`. The previous
-  runtime errors show the dependency packager ignored package dependencies; this bundling
-  approach avoids runtime npm package resolution.
-  The dotenv fix was pushed as `7214f5d`, together with upgrading Next.js 16.3.8 to patched
-  16.4.1 after the commit hook reported two critical and one high advisories. Earlier API
-  checks, 19 focused tests, emitted `.mjs` syntax check, web typecheck, 20 tests, production
-  build, repository scan, and repository check passed; web lint had one existing warning
-  and no errors. After pushing this service install change, redeploy and verify `/health`
-  and `/workspaces`. Current web origin: `https://slacker-tifi.vercel.app`. Socket.IO
-  WebSocket operation and cross-instance pub/sub on Vercel remain
-  unverified; the search limiter is process-local. Do not use `pnpm run initialize` as a
-  build/start command; production DB initialization is a deliberate one-time operation.
-  Revisit the `braces` advisory when a patched release is available.
+  pushed to `samiaptech/Slacker:main` as `05ebe11`. Repeated Vercel runtime logs showed
+  `ERR_MODULE_NOT_FOUND` for `express` from `/var/task/server.mjs`, even after ESM entrypoint
+  and filtered/hoisted pnpm install changes. The API now uses an esbuild-generated
+  self-contained ESM bundle (`dist/vercel/server.mjs`) as the configured Vercel service
+  entrypoint; its 8.1 MB output imports only Node built-ins. The server loads
+  `dotenv/config` only outside Vercel, preserving local `.env` support. The fix was pushed
+  to `samiaptech/Slacker:main` as `70cfa5f`. API typecheck/build/lint, 19 focused tests,
+  bundle syntax/import inspection, dependency audit, repository scan, and repository check
+  passed. **Next:** redeploy `main` at `70cfa5f`, inspect the API build output to confirm
+  `pnpm run build:vercel` and the configured bundle entrypoint are used, then verify
+  `/health` and `/workspaces`. Active web origin reported by user:
+  `https://slacker-tifi.vercel.app`. Socket.IO WebSocket operation and cross-instance
+  pub/sub on Vercel remain unverified; the search limiter is process-local. Do not use
+  `pnpm run initialize` as a build/start command; production DB initialization is a
+  deliberate one-time operation. Next.js was upgraded to patched 16.4.1 in `7214f5d`
+  after the audit found critical/high advisories. Revisit the `braces` advisory when patched.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`
