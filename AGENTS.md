@@ -298,17 +298,21 @@ Updated: 2026-10-22.
   pushed to `samiaptech/Slacker:main` as `05ebe11`. Vercel runtime logs showed that its
   Express entrypoint was first emitted as CommonJS `server.js` despite ESM imports; it is
   now `server.mts` and Vercel emits `server.mjs`. The next deployment confirmed ESM loading
-  but failed because `dotenv` was missing from `/var/task`. The entrypoint now dynamically
+  but failed because `dotenv` was missing from `/var/task`. The entrypoint dynamically
   loads `dotenv/config` only outside Vercel; Vercel supplies environment variables itself,
-  while local development retains `.env` support. The dotenv fix was pushed to
-  `samiaptech/Slacker:main` as `7214f5d`, together with a Next.js upgrade from vulnerable
-  16.3.8 to patched 16.4.1 after the commit hook reported two critical and one high
-  advisories. API typecheck/build, lint, 19 focused tests, emitted `dist/server.mjs` syntax
-  check, web typecheck, 20 tests, production build, repository scan, and repository check
-  passed; web lint has one existing warning and no errors. Redeploy and verify `/health`
-  and `/workspaces`. The current web origin is `https://slacker-tifi.vercel.app`; previous
-  Vercel deployment hostnames may no longer be active. Socket.IO WebSocket operation and
-  cross-instance pub/sub on Vercel remain
+  while local development retains `.env` support. The latest deployment could not resolve
+  `express` from `/var/task/server.mjs`, indicating service runtime dependencies are
+  missing. `vercel.json` now configures an API-specific filtered pnpm install for
+  `@workspace/api` and its workspace dependencies. The filtered install, API typecheck,
+  build, lint, 19 focused tests, `.mjs` syntax check, dependency audit, and `git diff
+  --check` pass. This Vercel configuration fix is not yet committed or pushed.
+  The dotenv fix was pushed as `7214f5d`, together with upgrading Next.js 16.3.8 to patched
+  16.4.1 after the commit hook reported two critical and one high advisories. Earlier API
+  checks, 19 focused tests, emitted `.mjs` syntax check, web typecheck, 20 tests, production
+  build, repository scan, and repository check passed; web lint had one existing warning
+  and no errors. After pushing this service install change, redeploy and verify `/health`
+  and `/workspaces`. Current web origin: `https://slacker-tifi.vercel.app`. Socket.IO
+  WebSocket operation and cross-instance pub/sub on Vercel remain
   unverified; the search limiter is process-local. Do not use `pnpm run initialize` as a
   build/start command; production DB initialization is a deliberate one-time operation.
   Revisit the `braces` advisory when a patched release is available.

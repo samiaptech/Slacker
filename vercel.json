@@ -7,7 +7,8 @@
     },
     "api": {
       "root": "servers/api",
-      "framework": "express"
+      "framework": "express",
+      "installCommand": "pnpm install --filter @workspace/api..."
     }
   },
   "rewrites": [
