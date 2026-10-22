@@ -295,21 +295,17 @@ Updated: 2026-10-22.
   and restart both apps if it is stale. The user is preparing a Vercel production
   deployment. Root `vercel.json` routes `web` and `api` on one domain, using
   `X-Workspace-Id` to distinguish channel API requests from Next.js channel pages. It was
-  pushed to `samiaptech/Slacker:main` as `05ebe11`. Vercel runtime logs showed that its
-  Express entrypoint was first emitted as CommonJS `server.js` despite ESM imports; it is
-  now `server.mts` and Vercel emits `server.mjs`. The next deployment confirmed ESM loading
-  but failed because `dotenv` was missing from `/var/task`. The entrypoint dynamically
-  loads `dotenv/config` only outside Vercel; Vercel supplies environment variables itself,
-  while local development retains `.env` support. The latest deployment could not resolve
-  `express` from `/var/task/server.mjs`, indicating service runtime dependencies are
-  missing. `vercel.json` configures a filtered pnpm install for `@workspace/api` and
-  workspace dependencies, using pnpm's hoisted `node_modules` layout to make packages
-  visible to Vercel's function packager. A local reinstall with the hoisted layout stalled
-  while downloading packages and was stopped; this exact install must be confirmed by the
-  Vercel build log. API typecheck/build/lint, 19 focused tests, `.mjs` syntax check,
-  dependency audit, repository scan/check passed. The change was pushed to
-  `samiaptech/Slacker:main` as `d2c5b97`. Redeploy and confirm the API install command
-  runs, then verify `/health` and `/workspaces`.
+  pushed to `samiaptech/Slacker:main` as `05ebe11`.   Vercel runtime logs showed its initial ESM fix then failed to resolve `dotenv`, followed
+  by repeated `ERR_MODULE_NOT_FOUND` for `express` from `/var/task/server.mjs` despite
+  filtered and hoisted pnpm installs. The API service now explicitly builds a self-contained
+  ESM bundle with esbuild (`dist/vercel/server.mjs`) and configures that output as the
+  service entrypoint; the bundle is 8.1 MB and its only external imports are Node built-ins.
+  The API entrypoint loads `dotenv/config` only outside Vercel, preserving local `.env`
+  support. API typecheck/build/lint, 19 focused tests, bundle syntax check, dependency
+  audit, and repository scan/check pass. **Next:** push this bundle change and redeploy;
+  confirm the API function starts, then verify `/health` and `/workspaces`. The previous
+  runtime errors show the dependency packager ignored package dependencies; this bundling
+  approach avoids runtime npm package resolution.
   The dotenv fix was pushed as `7214f5d`, together with upgrading Next.js 16.3.8 to patched
   16.4.1 after the commit hook reported two critical and one high advisories. Earlier API
   checks, 19 focused tests, emitted `.mjs` syntax check, web typecheck, 20 tests, production

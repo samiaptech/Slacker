@@ -8,7 +8,9 @@
     "api": {
       "root": "servers/api",
       "framework": "express",
-      "installCommand": "pnpm install --filter @workspace/api... --node-linker=hoisted --frozen-lockfile"
+      "entrypoint": "dist/vercel/server.mjs",
+      "installCommand": "pnpm install --filter @workspace/api... --frozen-lockfile",
+      "buildCommand": "pnpm run build:vercel"
     }
   },
   "rewrites": [
