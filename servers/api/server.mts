@@ -161,7 +161,9 @@ const server = createServer({ app, config, logger });
 socketIo.attach(server.raw);
 export default app;
 
-if (process.env.VERCEL !== "1") {
+const isVercelRuntime = process.env.VERCEL === "1";
+
+if (!isVercelRuntime) {
   const shutdown = createShutdown({ database, logger, server, socketIo });
   await server.start();
 

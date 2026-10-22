@@ -300,14 +300,20 @@ Updated: 2026-10-22.
   imports Express, injects the instance into `createApp`, exports the Express app as Vercel
   documents, and only starts the wrapped HTTP/Socket.IO server for local development.
   Focused API typecheck, ESLint, and 18 relevant tests passed; `git diff --check` passed.
-  A Vercel build remains unverified: the repository has no linked `.vercel` project and
-  Vercel CLI is not installed. **Next:** link/run the API Services build and verify its
-  runtime behavior. Socket.IO WebSocket operation on Vercel is not established by the
-  Express build fix; assess platform support and cross-instance pub/sub before claiming
-  production realtime reliability. The search limiter is also process-local. Do not use
-  `pnpm run initialize` as a build/start command; production database initialization is a
-  deliberate one-time operation. No files were staged, committed, or pushed. Revisit the
-  `braces` advisory when a patched release is available.
+  Vercel runtime logs revealed that the emitted `server.js` is loaded as CommonJS despite
+  containing ESM imports (`SyntaxError: Cannot use import statement outside a module`).
+  The Express entrypoint is now `server.mts`, which Vercel recognizes as an ESM entrypoint
+  and emits as `server.mjs`; API dev/start scripts, TypeScript includes, and lint target
+  were updated accordingly. API typecheck/build, ESLint, 19 focused API tests, emitted
+  `dist/server.mjs` syntax check, and `git diff --check` passed. The Vercel runtime build
+  remains unverified; redeploy and check `/health` and `/workspaces`. The user's logs confirm
+  module format failure, not missing environment or MongoDB connectivity. The active web origin is
+  `https://slacker-liart.vercel.app`; `https://slacker.vercel.app` is no longer active.
+  Socket.IO WebSocket operation on Vercel and cross-instance pub/sub still need
+  verification; the search limiter is process-local. Do not use `pnpm run initialize` as a
+  build/start command; production database initialization is a deliberate one-time
+  operation. No commit or push was made. Revisit the `braces` advisory when a patched
+  release is available.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`
