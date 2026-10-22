@@ -292,9 +292,15 @@ Updated: 2026-10-22.
   API/Socket.IO message, preserve retry/error behavior, and capture perceived-send and API
   timing in a populated browser. Continue production UI decomposition where cohesive
   boundaries improve readability. User: confirm local web/API configuration uses localhost
-  and restart both apps if it is stale. The user paused publishing while Codex completes
-  frontend work; no files were staged, committed, or pushed. Revisit the `braces` advisory
-  when a patched release is available.
+  and restart both apps if it is stale. The user is preparing a Vercel production
+  deployment. A provisional root `vercel.json` routes the `web` and `api` services on one
+  domain, using `X-Workspace-Id` to distinguish channel API requests from Next.js channel
+  pages. No inter-service bindings are needed because the browser calls the API through
+  public routes. The config and public path choices are awaiting user confirmation; no
+  deployment was made. Backend agent: confirm the API's Vercel Functions/WebSocket runtime
+  compatibility and add cross-instance Socket.IO pub/sub before production; Socket.IO
+  rooms and the message-search limiter are currently process-local. No files were staged,
+  committed, or pushed. Revisit the `braces` advisory when a patched release is available.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`

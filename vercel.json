@@ -1,0 +1,39 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "apps/web",
+      "framework": "nextjs"
+    },
+    "api": {
+      "root": "servers/api",
+      "framework": "express"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/api", "destination": { "service": "api" } },
+    { "source": "/socket.io/(.*)", "destination": { "service": "api" } },
+    { "source": "/socket.io", "destination": { "service": "api" } },
+    { "source": "/health", "destination": { "service": "api" } },
+    { "source": "/workspaces/(.*)", "destination": { "service": "api" } },
+    { "source": "/workspaces", "destination": { "service": "api" } },
+    { "source": "/workspace-invitations/(.*)", "destination": { "service": "api" } },
+    { "source": "/workspace/(.*)", "destination": { "service": "api" } },
+    { "source": "/workspace", "destination": { "service": "api" } },
+    { "source": "/direct-messages/(.*)", "destination": { "service": "api" } },
+    { "source": "/direct-messages", "destination": { "service": "api" } },
+    { "source": "/channels", "destination": { "service": "api" } },
+    {
+      "source": "/channels/(.*)",
+      "has": [{ "type": "header", "key": "x-workspace-id" }],
+      "destination": { "service": "api" }
+    },
+    {
+      "source": "/messages/search",
+      "has": [{ "type": "header", "key": "x-workspace-id" }],
+      "destination": { "service": "api" }
+    },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}
