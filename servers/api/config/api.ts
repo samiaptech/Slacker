@@ -11,4 +11,11 @@ export const createApiConfig = (environment: ValidatedApiEnvironment): ApiConfig
   googleClientId: environment.GOOGLE_CLIENT_ID,
   googleClientSecret: environment.GOOGLE_CLIENT_SECRET,
   logLevel: environment.LOG_LEVEL,
+  ...(environment.CLOUDINARY_CLOUD_NAME && environment.CLOUDINARY_API_KEY && environment.CLOUDINARY_API_SECRET
+    ? { cloudinary: Object.freeze({
+      cloudName: environment.CLOUDINARY_CLOUD_NAME,
+      apiKey: environment.CLOUDINARY_API_KEY,
+      apiSecret: environment.CLOUDINARY_API_SECRET
+    }) }
+    : {})
 });

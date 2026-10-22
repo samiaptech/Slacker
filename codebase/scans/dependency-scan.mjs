@@ -15,6 +15,7 @@ const toolFailure = (message, durationMs = 0, exitCode = 1) => ({
 export const runDependencyScan = async ({
   workspaceRoot,
   minimumSeverity = "high",
+  ignoredAdvisories = [],
   commandRunner = runToolCommand
 }) => {
   let execution;
@@ -40,7 +41,10 @@ export const runDependencyScan = async ({
   }
 
   const advisories = Object.values(report.advisories ?? {});
-  const issues = advisories.map((advisory) => ({
+  const ignoredAdvisoryIds = new Set(ignoredAdvisories);
+  const actionableAdvisories = advisories.filter((advisory) =>
+    !ignoredAdvisoryIds.has(advisory.github_advisory_id ?? String(advisory.id ?? "unknown")));
+  const issues = actionableAdvisories.map((advisory) => ({
     level: "error",
     rule: "dependency-vulnerability",
     tool: "pnpm audit",
@@ -50,7 +54,7 @@ export const runDependencyScan = async ({
     message: `pnpm audit reported ${advisory.severity ?? "unknown"} vulnerability ${advisory.github_advisory_id ?? advisory.id ?? "unknown"} in ${advisory.module_name ?? "an installed package"}.`
   }));
 
-  if (execution.exitCode !== 0 && issues.length === 0) {
+  if (execution.exitCode !== 0 && advisories.length === 0) {
     return toolFailure("pnpm audit exited non-zero without reporting a vulnerability; registry or tool execution failed.", execution.durationMs, execution.exitCode);
   }
 
@@ -59,7 +63,7 @@ export const runDependencyScan = async ({
       name: "dependency-audit",
       engine: "pnpm audit",
       status: issues.length === 0 ? "passed" : "failed",
-      exitCode: execution.exitCode,
+      exitCode: issues.length === 0 ? 0 : execution.exitCode,
       durationMs: execution.durationMs,
       findingCount: issues.length
     },

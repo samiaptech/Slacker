@@ -1,10 +1,19 @@
 import { z } from "zod";
 import type {
+  ChatAttachmentResponse,
   DirectConversationListResponse,
   DirectConversationResponse,
   DirectMessageListResponse,
   DirectMessageResponse
 } from "@workspace/types";
+
+const attachmentSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  mimeType: z.string().min(1),
+  size: z.number().int().nonnegative(),
+  downloadUrl: z.string().min(1)
+}).strict() satisfies z.ZodType<ChatAttachmentResponse>;
 
 const directConversationSchema = z.object({
   id: z.string().min(1),
@@ -18,18 +27,23 @@ const directConversationSchema = z.object({
   lastActivityAt: z.iso.datetime()
 }).strict() satisfies z.ZodType<DirectConversationResponse>;
 
-const directMessageSchema = z.object({
+const directMessageBaseSchema = z.object({
   id: z.string().min(1),
   conversationId: z.string().min(1),
   senderId: z.string().min(1),
-  text: z.string().min(1).refine((text) => Array.from(text).length <= 4_000),
+  text: z.string().refine((text) => Array.from(text).length <= 4_000),
   createdAt: z.iso.datetime(),
+  attachments: z.array(attachmentSchema).max(5).readonly().optional(),
   sender: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     image: z.string().nullable()
   }).strict()
-}).strict() satisfies z.ZodType<DirectMessageResponse>;
+}).strict();
+
+const directMessageSchema = directMessageBaseSchema.transform((message): DirectMessageResponse => {
+  return { ...message, attachments: message.attachments ?? [] };
+}) satisfies z.ZodType<DirectMessageResponse>;
 
 export const directConversationResponseSchema = z.object({
   conversation: directConversationSchema

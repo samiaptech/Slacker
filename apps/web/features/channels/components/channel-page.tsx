@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import Link from "next/link";
-import { Button } from "@workspace/ui";
 import { channelResponseSchema, type ChannelResponseView } from "../types";
 import { ChannelMembersPanel } from "./channel-members-panel";
 import { ChannelMessages } from "./channel-messages";
+import { ChannelProfilePanel } from "./channel-profile-panel";
+import { useChannelProfileToggle } from "./channel-profile-toggle-context";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 
 type ChannelPageProps = Readonly<{ apiBaseUrl: string; channelId: string }>;
@@ -15,10 +15,14 @@ export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactE
   const [channel, setChannel] = useState<ChannelResponseView | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { isOpen: isProfileOpen, setIsOpen: setIsProfileOpen } = useChannelProfileToggle();
 
   useEffect(() => {
     const controller = new AbortController();
     const loadChannel = async (): Promise<void> => {
+      setChannel(null);
+      setErrorMessage(null);
+      setIsLoading(true);
       try {
         const response = await fetch(new URL(`/channels/${encodeURIComponent(channelId)}`, apiBaseUrl), {
           credentials: "include",
@@ -50,43 +54,45 @@ export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactE
   }, [activeWorkspace.id, apiBaseUrl, channelId]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div>
-        <Button asChild variant="outline"><Link href="/">Back to workspace</Link></Button>
-      </div>
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground" role="status">Opening channel…</p>
-      ) : errorMessage ? (
-        <section aria-labelledby="channel-error-title" className="rounded-xl border border-border bg-card p-8">
-          <h1 className="text-xl font-semibold text-foreground" id="channel-error-title">Channel unavailable</h1>
-          <p className="mt-2 text-sm text-muted-foreground" role="alert">{errorMessage}</p>
-        </section>
-      ) : channel ? (
-        <>
-          <section aria-labelledby="channel-title" className="rounded-xl border border-border bg-card p-4 sm:p-5">
-            <p className="text-sm font-medium text-primary">
-              {channel.visibility === "public" ? "Public channel" : "Private channel"}
-              {channel.lifecycleState === "archived" ? " · Archived" : ""}
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground" id="channel-title">
-              # {channel.name}
-            </h1>
-            {channel.description ? (
-              <p className="mt-3 text-sm text-muted-foreground">{channel.description}</p>
-            ) : null}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {isLoading ? (
+          channel ? null : (
+            <ChannelMessages
+              apiBaseUrl={apiBaseUrl}
+              canSend={false}
+              channelId={channelId}
+              channelDescription={null}
+              channelName="channel"
+            />
+          )
+        ) : errorMessage ? (
+          <section aria-labelledby="channel-error-title" className="m-4 rounded-xl border border-border bg-card p-8">
+            <h1 className="text-xl font-semibold text-foreground" id="channel-error-title">Channel unavailable</h1>
+            <p className="mt-2 text-sm text-muted-foreground" role="alert">{errorMessage}</p>
           </section>
+        ) : channel ? (
           <ChannelMessages
             apiBaseUrl={apiBaseUrl}
             canSend={channel.lifecycleState === "active"}
             channelId={channel.id}
+            channelDescription={channel.description}
+            channelName={channel.name}
           />
-        </>
-      ) : null}
-      {channel?.visibility === "private" ? (
-        <ChannelMembersPanel
+        ) : null}
+      </div>
+      {channel ? (
+        <ChannelProfilePanel
           apiBaseUrl={apiBaseUrl}
           channelId={channel.id}
-          isActive={channel.lifecycleState === "active"}
+          channelName={channel.name}
+          description={channel.description}
+          isOpen={isProfileOpen}
+          onOpenChange={setIsProfileOpen}
+          managementPanel={channel.visibility === "private" ? (
+            <ChannelMembersPanel apiBaseUrl={apiBaseUrl} channelId={channel.id} isActive={channel.lifecycleState === "active"} />
+          ) : undefined}
+          visibility={channel.visibility}
         />
       ) : null}
     </div>

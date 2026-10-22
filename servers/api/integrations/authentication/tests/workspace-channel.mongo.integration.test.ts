@@ -12,6 +12,7 @@ import {
   type ChannelDocument,
   type ChannelMembershipDocument,
   type ChannelMessageDocument,
+  createMongoChannelMembershipCleanup,
   createMongoChannelMessageStorage,
   createMongoChannelStorage,
   decodeChannelListCursor,
@@ -104,7 +105,8 @@ void test("enforces channel browse and membership contracts against a MongoDB re
     const member = memberIdentity.id;
     const outside = outsideIdentity.id;
 
-    const workspaceStorage = createMongoWorkspaceStorage(database, mongo.withTransaction);
+    const cleanupChannelMemberships = createMongoChannelMembershipCleanup(database);
+    const workspaceStorage = createMongoWorkspaceStorage(database, mongo.withTransaction, cleanupChannelMemberships);
     const workspaceRepository = createWorkspaceRepository(workspaceStorage);
     await workspaceStorage.initialize();
     await database.collection<WorkspaceDocument>(WORKSPACES_COLLECTION).insertMany([
@@ -168,7 +170,7 @@ void test("enforces channel browse and membership contracts against a MongoDB re
     await createChannel("workspace-1", "charlie", "public");
     await createChannel("workspace-1", "delta", "public");
     const privateId = await createChannel("workspace-1", "secret", "private");
-    await createChannel("workspace-2", "foreign", "public");
+    const foreignId = await createChannel("workspace-2", "foreign", "public");
     await database.collection<ChannelDocument>(CHANNELS_COLLECTION).insertOne({
       _id: "archived-channel",
       workspaceId: "workspace-1",
@@ -231,6 +233,23 @@ void test("enforces channel browse and membership contracts against a MongoDB re
 
     const persistedMessage = await messageService.send("workspace-1", bravoId, member, "Retained after leaving.");
     assert.equal(persistedMessage.kind, "sent");
+    const retainedAttachment = {
+      id: "leave-test-file",
+      name: "brief.pdf",
+      mimeType: "application/pdf",
+      size: 128,
+      publicId: "private/leave-test-file",
+      resourceType: "raw" as const,
+      format: "pdf"
+    };
+    await database.collection<ChannelMessageDocument>(CHANNEL_MESSAGES_COLLECTION).insertOne({
+      _id: "retained-file-message",
+      channelId: bravoId,
+      senderId: member,
+      text: "",
+      createdAt: nextDate(),
+      attachments: [retainedAttachment]
+    });
     const ownerLeft = await channelService.leaveChannel("workspace-1", bravoId, owner);
     assert.equal(ownerLeft.kind, "left");
     assert.equal(await channelService.getForMember("workspace-1", bravoId, owner), null);
@@ -305,6 +324,83 @@ void test("enforces channel browse and membership contracts against a MongoDB re
       assert.equal("text" in event, false);
       assert.equal("email" in event, false);
     }
+
+    await channelService.inviteMember("workspace-1", privateId, owner, "member@example.test");
+    await database.collection<WorkspaceMembershipDocument>(WORKSPACE_MEMBERSHIPS_COLLECTION).insertOne({
+      _id: `workspace-2:${member}`,
+      workspaceId: "workspace-2",
+      userId: member,
+      role: "member",
+      joinedAt: createdAt
+    });
+    assert.equal((await channelService.joinPublicChannel("workspace-2", foreignId, member)).kind, "joined");
+
+    const affectedChannelIds = [generalId, bravoId, privateId, "archived-channel"];
+    const channelsBeforeLeave = await database.collection<ChannelDocument>(CHANNELS_COLLECTION)
+      .find({ _id: { $in: affectedChannelIds }, workspaceId: "workspace-1" })
+      .sort({ _id: 1 })
+      .toArray();
+    const workspaceBeforeFailure = await database.collection<WorkspaceDocument>(WORKSPACES_COLLECTION)
+      .findOne({ _id: "workspace-1" });
+    assert.ok(workspaceBeforeFailure);
+    const failingWorkspaceStorage = createMongoWorkspaceStorage(
+      database,
+      mongo.withTransaction,
+      async (session, workspaceId, userId) => {
+        await cleanupChannelMemberships(session, workspaceId, userId);
+        throw new Error("Simulated failure after channel cleanup.");
+      }
+    );
+    await assert.rejects(
+      failingWorkspaceStorage.removeMember("workspace-1", member, member),
+      /Simulated failure after channel cleanup/
+    );
+    assert.ok(await database.collection<WorkspaceMembershipDocument>(WORKSPACE_MEMBERSHIPS_COLLECTION)
+      .findOne({ workspaceId: "workspace-1", userId: member }));
+    for (const channelId of affectedChannelIds) {
+      assert.equal(await database.collection<ChannelMembershipDocument>(CHANNEL_MEMBERSHIPS_COLLECTION)
+        .countDocuments({ channelId, userId: member }), 1);
+    }
+    const channelsAfterFailure = await database.collection<ChannelDocument>(CHANNELS_COLLECTION)
+      .find({ _id: { $in: affectedChannelIds }, workspaceId: "workspace-1" })
+      .sort({ _id: 1 })
+      .toArray();
+    assert.deepEqual(
+      channelsAfterFailure.map(({ _id, membershipRevision }) => [ _id, membershipRevision ]),
+      channelsBeforeLeave.map(({ _id, membershipRevision }) => [ _id, membershipRevision ])
+    );
+    assert.equal((await database.collection<WorkspaceDocument>(WORKSPACES_COLLECTION)
+      .findOne({ _id: "workspace-1" }))?.membershipRevision, workspaceBeforeFailure.membershipRevision);
+
+    assert.equal(await workspaceStorage.removeMember("workspace-1", member, member), "removed");
+    assert.equal(await database.collection<WorkspaceMembershipDocument>(WORKSPACE_MEMBERSHIPS_COLLECTION)
+      .findOne({ workspaceId: "workspace-1", userId: member }), null);
+    const workspaceAfterLeave = await database.collection<WorkspaceDocument>(WORKSPACES_COLLECTION)
+      .findOne({ _id: "workspace-1" });
+    assert.equal(workspaceAfterLeave?.membershipRevision, (workspaceBeforeFailure.membershipRevision ?? 0) + 1);
+    assert.ok(await database.collection<WorkspaceMembershipDocument>(WORKSPACE_MEMBERSHIPS_COLLECTION)
+      .findOne({ workspaceId: "workspace-2", userId: member }));
+    for (const channelId of affectedChannelIds) {
+      assert.equal(await database.collection<ChannelMembershipDocument>(CHANNEL_MEMBERSHIPS_COLLECTION)
+        .countDocuments({ channelId, userId: member }), 0);
+    }
+    assert.equal(await database.collection<ChannelMembershipDocument>(CHANNEL_MEMBERSHIPS_COLLECTION)
+      .countDocuments({ channelId: foreignId, userId: member }), 1);
+    const channelsAfterLeave = await database.collection<ChannelDocument>(CHANNELS_COLLECTION)
+      .find({ _id: { $in: affectedChannelIds }, workspaceId: "workspace-1" })
+      .sort({ _id: 1 })
+      .toArray();
+    assert.deepEqual(
+      channelsAfterLeave.map(({ _id, membershipRevision }) => [ _id, membershipRevision ]),
+      channelsBeforeLeave.map(({ _id, membershipRevision }) => [ _id, (membershipRevision ?? 0) + 1 ])
+    );
+    assert.equal(await database.collection<ChannelMessageDocument>(CHANNEL_MESSAGES_COLLECTION)
+      .countDocuments({ channelId: bravoId }), 2);
+    const retainedFileMessage = await database.collection<ChannelMessageDocument>(CHANNEL_MESSAGES_COLLECTION)
+      .findOne({ _id: "retained-file-message" });
+    assert.deepEqual(retainedFileMessage?.attachments, [retainedAttachment]);
+    assert.equal(await database.collection<ChannelMessageDocument>(CHANNEL_MESSAGES_COLLECTION)
+      .countDocuments({ channelId: privateId }), 1);
   } finally {
     await database.dropDatabase();
     await mongo.disconnect();

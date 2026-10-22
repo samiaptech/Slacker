@@ -7,7 +7,12 @@ export {
   createRemoveChannelMemberController
 } from "./channel.controller.js";
 export { createJoinChannelController, createLeaveChannelController } from "./channel.controller.js";
-export { createListChannelMessagesController, createSendChannelMessageController } from "./channel-message.controller.js";
+export {
+  createAuthorizeChannelMessageUploadController,
+  createDownloadChannelAttachmentController,
+  createListChannelMessagesController,
+  createSendChannelMessageController
+} from "./channel-message.controller.js";
 export type {
   ChannelAccessDependencies,
   ChannelMemberEmailVisibilityResult,

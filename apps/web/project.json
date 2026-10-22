@@ -4,7 +4,7 @@
   "description": "Primary Next.js web application.",
   "internalDependencies": ["eslint-config", "tsconfig", "types", "ui"],
   "externalDependencies": ["better-auth", "lucide-react", "next", "react", "react-dom", "socket.io-client", "tailwindcss", "zod"],
-  "capabilities": ["web", "app-router", "google-sso", "workspace-access", "direct-messages", "shadcn-ui", "tailwind", "socket-io-realtime"],
+  "capabilities": ["web", "app-router", "google-sso", "workspace-access", "direct-messages", "message-search", "shadcn-ui", "tailwind", "socket-io-realtime"],
   "tasks": {
     "dev": { "command": "pnpm run dev", "cache": false },
     "build": { "command": "pnpm run build", "outputs": [".next"], "environment": ["NEXT_PUBLIC_API_BASE_URL"], "cache": true },

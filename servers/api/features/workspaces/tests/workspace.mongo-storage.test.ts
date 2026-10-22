@@ -11,8 +11,12 @@ import {
 } from "../models/index.js";
 import { createMongoWorkspaceStorage } from "../integrations/index.js";
 
+const noChannelMembershipCleanup = (): Promise<void> => Promise.resolve();
+
 const makeDatabase = (initialMemberships: readonly WorkspaceMembershipDocument[] = []) => {
   const calls: unknown[] = [];
+  const readinessReads = { metadata: 0, indexes: 0 };
+  let schemaReady = true;
   const membershipsById = new Map(initialMemberships.map((membership) => [membership._id, { ...membership }]));
   const readFilter = (value: unknown): Readonly<Record<string, unknown>> =>
     typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
@@ -26,26 +30,34 @@ const makeDatabase = (initialMemberships: readonly WorkspaceMembershipDocument[]
       return Promise.resolve({});
     },
     listCollections: ({ name }: Readonly<{ name: string }>) => ({
-      next: () => Promise.resolve({
-        name,
-        options: {
-          validator: WORKSPACE_COLLECTION_VALIDATORS[
-            name as typeof WORKSPACES_COLLECTION | typeof WORKSPACE_MEMBERSHIPS_COLLECTION | typeof WORKSPACE_INVITE_LINKS_COLLECTION
-          ]
-        }
-      })
+      next: () => {
+        readinessReads.metadata += 1;
+        return Promise.resolve({
+          name,
+          options: {
+            validator: schemaReady
+              ? WORKSPACE_COLLECTION_VALIDATORS[
+                name as typeof WORKSPACES_COLLECTION | typeof WORKSPACE_MEMBERSHIPS_COLLECTION | typeof WORKSPACE_INVITE_LINKS_COLLECTION
+              ]
+              : {}
+          }
+        });
+      }
     }),
     collection: (name: typeof WORKSPACES_COLLECTION | typeof WORKSPACE_MEMBERSHIPS_COLLECTION | typeof WORKSPACE_INVITE_LINKS_COLLECTION) => ({
       createIndex: (keys: unknown, options: unknown) => {
         calls.push({ operation: "createIndex", name, keys, options });
         return Promise.resolve("created");
       },
-      indexes: () => Promise.resolve(WORKSPACE_INDEXES[name].map((index) => ({
-        name: index.options.name,
-        key: index.keys,
-        ...("unique" in index.options ? { unique: index.options.unique } : {}),
-        ...("expireAfterSeconds" in index.options ? { expireAfterSeconds: index.options.expireAfterSeconds } : {})
-      }))),
+      indexes: () => {
+        readinessReads.indexes += 1;
+        return Promise.resolve(WORKSPACE_INDEXES[name].map((index) => ({
+          name: index.options.name,
+          key: index.keys,
+          ...("unique" in index.options ? { unique: index.options.unique } : {}),
+          ...("expireAfterSeconds" in index.options ? { expireAfterSeconds: index.options.expireAfterSeconds } : {})
+        })));
+      },
       find: (filter: unknown) => {
         calls.push({ operation: "find", name, filter });
         return {
@@ -100,12 +112,19 @@ const makeDatabase = (initialMemberships: readonly WorkspaceMembershipDocument[]
     })
   };
   const withTransaction: MongoTransaction = (operation) => operation({} as never);
-  return { database: database as unknown as MongoDatabase, calls, withTransaction, membershipsById };
+  return {
+    database: database as unknown as MongoDatabase,
+    calls,
+    withTransaction,
+    membershipsById,
+    readinessReads,
+    setSchemaReady: (ready: boolean): void => { schemaReady = ready; }
+  };
 };
 
 void test("initializes workspace, membership, and reusable invitation validators and indexes", async () => {
   const { database, calls, withTransaction } = makeDatabase();
-  await createMongoWorkspaceStorage(database, withTransaction).initialize();
+  await createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup).initialize();
 
   assert.equal(calls.filter((call) =>
     typeof call === "object" && call !== null && "operation" in call && call.operation === "createCollection").length, 3);
@@ -113,9 +132,38 @@ void test("initializes workspace, membership, and reusable invitation validators
     typeof call === "object" && call !== null && "operation" in call && call.operation === "createIndex").length, 5);
 });
 
+void test("validates workspace storage once per storage instance and shares concurrent readiness checks", async () => {
+  const { database, withTransaction, readinessReads } = makeDatabase();
+  const storage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
+
+  await Promise.all([
+    storage.findWorkspace("workspace-1"),
+    storage.findMembership("workspace-1", "user-1")
+  ]);
+  await storage.findWorkspace("workspace-1");
+
+  assert.deepEqual(readinessReads, { metadata: 3, indexes: 3 });
+});
+
+void test("retries workspace readiness after an incomplete migration is corrected", async () => {
+  const { database, withTransaction, readinessReads, setSchemaReady } = makeDatabase();
+  const storage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
+  setSchemaReady(false);
+
+  await assert.rejects(
+    storage.findWorkspace("workspace-1"),
+    (error: unknown) => typeof error === "object" && error !== null
+      && "kind" in error && error.kind === "workspace-storage-unavailable"
+  );
+
+  setSchemaReady(true);
+  await storage.findWorkspace("workspace-1");
+  assert.deepEqual(readinessReads, { metadata: 6, indexes: 3 });
+});
+
 void test("only resolves unexpired invitation token hashes and transactionally writes memberships", async () => {
   const { database, calls, withTransaction } = makeDatabase();
-  const storage = createMongoWorkspaceStorage(database, withTransaction);
+  const storage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
   const checkedAt = new Date("2026-10-14T00:00:00.000Z");
   await storage.findInviteLink("a".repeat(64), checkedAt);
   assert.deepEqual(calls[0], {
@@ -149,7 +197,7 @@ void test("only resolves unexpired invitation token hashes and transactionally w
 
 void test("lists workspace memberships in join order with a stable user tie-breaker", async () => {
   const { database, calls, withTransaction } = makeDatabase();
-  const storage = createMongoWorkspaceStorage(database, withTransaction);
+  const storage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
   await storage.listWorkspaceMemberships("team-1");
 
   assert.deepEqual(calls.slice(-2), [
@@ -168,7 +216,7 @@ void test("lists workspace memberships in join order with a stable user tie-brea
 
 void test("persists workspace email visibility settings", async () => {
   const { database, calls, withTransaction } = makeDatabase();
-  const storage = createMongoWorkspaceStorage(database, withTransaction);
+  const storage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
   assert.equal(await storage.setMemberEmailsVisible("team-1", false), true);
   assert.deepEqual(calls.at(-1), {
     operation: "updateOne",
@@ -184,7 +232,11 @@ void test("updates roles and removes memberships transactionally with workspace-
     { _id: "team-1:member-1", workspaceId: "team-1", userId: "member-1", role: "member", joinedAt: new Date() }
   ];
   const { database, calls, withTransaction, membershipsById } = makeDatabase(initialMemberships);
-  const storage = createMongoWorkspaceStorage(database, withTransaction);
+  const cleanupCalls: unknown[][] = [];
+  const storage = createMongoWorkspaceStorage(database, withTransaction, (session, workspaceId, userId) => {
+    cleanupCalls.push([session, workspaceId, userId]);
+    return Promise.resolve();
+  });
 
   assert.equal(await storage.changeMemberRole("team-1", "owner-1", "member-1", "admin"), "updated");
   assert.equal(membershipsById.get("team-1:member-1")?.role, "admin");
@@ -195,4 +247,75 @@ void test("updates roles and removes memberships transactionally with workspace-
 
   assert.equal(await storage.removeMember("team-1", "owner-1", "member-1"), "removed");
   assert.equal(membershipsById.has("team-1:member-1"), false);
+  assert.deepEqual(cleanupCalls.map(([, workspaceId, userId]) => [workspaceId, userId]), [
+    ["team-1", "member-1"]
+  ]);
+});
+
+void test("allows self-leave and changes membership revision only when removal succeeds", async () => {
+  const member = {
+    _id: "team-1:member-1",
+    workspaceId: "team-1",
+    userId: "member-1",
+    role: "member" as const,
+    joinedAt: new Date()
+  };
+  const { database, calls, withTransaction, membershipsById } = makeDatabase([
+    { ...member, role: "admin", _id: "team-1:owner-1", userId: "owner-1" },
+    member
+  ]);
+  const cleanupCalls: unknown[][] = [];
+  const storage = createMongoWorkspaceStorage(database, withTransaction, (session, workspaceId, userId) => {
+    cleanupCalls.push([session, workspaceId, userId]);
+    return Promise.resolve();
+  });
+
+  assert.equal(await storage.removeMember("team-1", "member-1", "member-1"), "removed");
+  assert.equal(membershipsById.has("team-1:member-1"), false);
+  assert.deepEqual(cleanupCalls.map(([, workspaceId, userId]) => [workspaceId, userId]), [
+    ["team-1", "member-1"]
+  ]);
+  assert.equal(calls.some((call) =>
+    typeof call === "object" && call !== null && "name" in call && call.name === WORKSPACES_COLLECTION
+      && "update" in call && JSON.stringify(call.update) === JSON.stringify({ $inc: { membershipRevision: 1 } })
+  ), true);
+
+  const lastAdminStorage = createMongoWorkspaceStorage(database, withTransaction, noChannelMembershipCleanup);
+  calls.length = 0;
+  assert.equal(await lastAdminStorage.removeMember("team-1", "owner-1", "owner-1"), "last-admin");
+  assert.equal(membershipsById.has("team-1:owner-1"), true);
+  assert.equal(calls.some((call) =>
+    typeof call === "object" && call !== null && "name" in call && call.name === WORKSPACES_COLLECTION
+      && "update" in call && JSON.stringify(call.update) === JSON.stringify({ $inc: { membershipRevision: 1 } })
+  ), false);
+});
+
+void test("does not delete workspace membership when channel cleanup fails", async () => {
+  const member: WorkspaceMembershipDocument = {
+    _id: "team-1:member-1",
+    workspaceId: "team-1",
+    userId: "member-1",
+    role: "member",
+    joinedAt: new Date()
+  };
+  const { database, calls, withTransaction, membershipsById } = makeDatabase([
+    { ...member, _id: "team-1:owner-1", userId: "owner-1", role: "admin" },
+    member
+  ]);
+  const failure = new Error("Channel cleanup failed.");
+  const storage = createMongoWorkspaceStorage(
+    database,
+    withTransaction,
+    () => Promise.reject(failure)
+  );
+
+  await assert.rejects(
+    storage.removeMember("team-1", "member-1", "member-1"),
+    (error: unknown) => error === failure
+  );
+  assert.equal(membershipsById.has("team-1:member-1"), true);
+  assert.equal(calls.some((call) =>
+    typeof call === "object" && call !== null && "operation" in call && call.operation === "deleteOne"
+      && "name" in call && call.name === WORKSPACE_MEMBERSHIPS_COLLECTION
+  ), false);
 });

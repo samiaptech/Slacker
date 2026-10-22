@@ -3,11 +3,12 @@ import { runSecretScan } from "../security/scanner/index.mjs";
 
 export const runWorkspaceScans = async (workspace, dependencies = {}) => {
   const minimumSeverity = workspace.architecture.security?.dependencyAudit?.minimumSeverity ?? "high";
+  const ignoredAdvisories = workspace.architecture.security?.dependencyAudit?.ignoredAdvisories ?? [];
   const secretScanPolicy = workspace.architecture.security?.secretScan;
   const dependencyScanner = dependencies.dependencyScanner ?? runDependencyScan;
   const secretScanner = dependencies.secretScanner ?? runSecretScan;
   const [dependencyScan, secretScan] = await Promise.all([
-    dependencyScanner({ workspaceRoot: workspace.root, minimumSeverity, commandRunner: dependencies.commandRunner }),
+    dependencyScanner({ workspaceRoot: workspace.root, minimumSeverity, ignoredAdvisories, commandRunner: dependencies.commandRunner }),
     secretScanner({ workspaceRoot: workspace.root, policy: secretScanPolicy, commandRunner: dependencies.commandRunner })
   ]);
   const tools = [dependencyScan.result, secretScan.result];

@@ -5,6 +5,7 @@ import { createApp, createServer } from "../../../bootstrap/index.js";
 import { createWorkspaceServiceFixture } from "../../../tests/workspace-service-fixture.js";
 import type { AuthenticationIntegration } from "../../../integrations/index.js";
 import type { ApiConfig } from "../../../types/index.js";
+import type { WorkspaceChannelRealtimePublisher as ChannelRealtimePublisher } from "../../channels/public/index.js";
 
 const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 const config: ApiConfig = {
@@ -38,12 +39,14 @@ const createAuthentication = (): AuthenticationIntegration => ({
 });
 const channelMessageService: Parameters<typeof createApp>[0]["channelMessageService"] = {
   list: () => Promise.resolve({ kind: "channel-unavailable" }),
-  send: () => Promise.resolve({ kind: "channel-unavailable" })
+  send: () => Promise.resolve({ kind: "channel-unavailable" }),
+  getAttachment: () => Promise.resolve({ kind: "not-found" })
 };
 
 const startApi = async (
   fixture = createWorkspaceServiceFixture(),
-  channelServiceOverrides: Partial<Pick<Parameters<typeof createApp>[0]["channelService"], "inviteMember">> = {}
+  channelServiceOverrides: Partial<Pick<Parameters<typeof createApp>[0]["channelService"], "inviteMember">> = {},
+  channelRealtime?: ChannelRealtimePublisher
 ) => {
   const app = createApp({
     config,
@@ -63,6 +66,7 @@ const startApi = async (
       ...channelServiceOverrides
     },
     channelMessageService,
+    ...(channelRealtime ? { channelRealtime } : {}),
     workspaceService: fixture.service
   });
   const server = createServer({ app, config, logger });
@@ -134,7 +138,7 @@ void test("issues reusable seven-day invitation links and joins users after sign
   });
   assert.equal(linkResponse.status, 201);
   const link = await linkResponse.json() as { inviteUrl: string; expiresAt: string };
-  assert.equal(new Date(link.expiresAt).getTime() - Date.now() > 0, true);
+  assert.equal(link.expiresAt, "2026-10-21T00:00:00.000Z");
   const token = new URL(link.inviteUrl).pathname.split("/").at(-1);
   assert.ok(token);
 
@@ -289,12 +293,6 @@ void test("lets admins change other member roles and remove members", async (con
   });
   assert.equal(nonAdminDenied.status, 403);
 
-  const selfRemovalDenied = await fetch(`${url}/workspaces/team-1/members/member-1`, {
-    method: "DELETE",
-    headers: { "x-test-identity": "member" }
-  });
-  assert.equal(selfRemovalDenied.status, 403);
-
   const selfRoleChangeDenied = await fetch(`${url}/workspaces/team-1/members/member-1`, {
     method: "PATCH",
     headers: { "content-type": "application/json", "x-test-identity": "member" },
@@ -314,6 +312,65 @@ void test("lets admins change other member roles and remove members", async (con
   });
   assert.equal(removeMember.status, 204);
   assert.equal(fixture.memberships.has("team-1:owner-1"), false);
+});
+
+void test("allows a member to leave but denies removing another member and invalidates realtime access", async (context) => {
+  const fixture = createWorkspaceServiceFixture();
+  fixture.seed("team-1", ["owner-1", "member-1", "other-1"]);
+  const notifications: string[] = [];
+  const realtime: ChannelRealtimePublisher = {
+    publishMessage: () => undefined,
+    publishChannelListChanged: () => undefined,
+    publishWorkspaceMembersChanged: (workspaceId) => notifications.push(`members:${workspaceId}`),
+    publishMembersChanged: () => undefined,
+    revokeChannelAccess: () => undefined,
+    revokeWorkspaceAccess: (workspaceId, userId) => notifications.push(`revoke:${workspaceId}:${userId}`)
+  };
+  const { server, url } = await startApi(fixture, {}, realtime);
+  context.after(async () => server.stop());
+
+  const denied = await fetch(`${url}/workspaces/team-1/members/other-1`, {
+    method: "DELETE",
+    headers: { "x-test-identity": "member" }
+  });
+  assert.equal(denied.status, 403);
+
+  const left = await fetch(`${url}/workspaces/team-1/members/member-1`, {
+    method: "DELETE",
+    headers: { "x-test-identity": "member" }
+  });
+  assert.equal(left.status, 204);
+  assert.equal(fixture.memberships.has("team-1:member-1"), false);
+  assert.deepEqual(notifications, ["members:team-1", "revoke:team-1:member-1"]);
+});
+
+void test("allows an admin to leave when another admin remains", async (context) => {
+  const fixture = createWorkspaceServiceFixture();
+  fixture.seed("team-1", ["owner-1", "member-1"], "admin");
+  const { server, url } = await startApi(fixture);
+  context.after(async () => server.stop());
+
+  const response = await fetch(`${url}/workspaces/team-1/members/owner-1`, {
+    method: "DELETE",
+    headers: { "x-test-identity": "owner" }
+  });
+  assert.equal(response.status, 204);
+  assert.equal(fixture.memberships.has("team-1:owner-1"), false);
+  assert.equal(fixture.memberships.get("team-1:member-1")?.role, "admin");
+});
+
+void test("prevents the last admin from leaving a workspace", async (context) => {
+  const fixture = createWorkspaceServiceFixture();
+  fixture.seed("team-1", ["owner-1"], "admin");
+  const { server, url } = await startApi(fixture);
+  context.after(async () => server.stop());
+
+  const response = await fetch(`${url}/workspaces/team-1/members/owner-1`, {
+    method: "DELETE",
+    headers: { "x-test-identity": "owner" }
+  });
+  assert.equal(response.status, 409);
+  assert.equal(fixture.memberships.has("team-1:owner-1"), true);
 });
 
 void test("returns a read-only workspace profile only to members of that workspace", async (context) => {

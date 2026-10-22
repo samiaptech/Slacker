@@ -1,7 +1,9 @@
 export {
+  createAuthorizeDirectMessageUploadController,
   createGetDirectMessageController,
   createListDirectMessageHistoryController,
   createListDirectMessagesController,
   createOpenDirectMessageController,
-  createSendDirectMessageController
+  createSendDirectMessageController,
+  createDownloadDirectMessageAttachmentController
 } from "./direct-message.controller.js";

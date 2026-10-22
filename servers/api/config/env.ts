@@ -15,5 +15,14 @@ export const readApiEnvironment = (
   BETTER_AUTH_SECRET: source.BETTER_AUTH_SECRET,
   GOOGLE_CLIENT_ID: source.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: source.GOOGLE_CLIENT_SECRET,
-  LOG_LEVEL: source.LOG_LEVEL
+  LOG_LEVEL: source.LOG_LEVEL,
+  ...(source.CLOUDINARY_CLOUD_NAME !== undefined
+    ? { CLOUDINARY_CLOUD_NAME: source.CLOUDINARY_CLOUD_NAME }
+    : {}),
+  ...(source.CLOUDINARY_API_KEY !== undefined
+    ? { CLOUDINARY_API_KEY: source.CLOUDINARY_API_KEY }
+    : {}),
+  ...(source.CLOUDINARY_API_SECRET !== undefined
+    ? { CLOUDINARY_API_SECRET: source.CLOUDINARY_API_SECRET }
+    : {})
 });

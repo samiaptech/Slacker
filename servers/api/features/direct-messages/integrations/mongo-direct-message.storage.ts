@@ -51,7 +51,12 @@ const assertCollection = async (
     name: string;
     validator: unknown;
     indexes: readonly Readonly<{ keys: unknown; options: Readonly<{ name: string; unique: boolean }> }>[];
-    readIndexes: () => Promise<readonly Readonly<{ name?: string; key: unknown; unique?: boolean }>[]>;
+    readIndexes: () => Promise<readonly Readonly<{
+      name?: string;
+      key: unknown;
+      unique?: boolean;
+      weights?: unknown;
+    }>[]>;
   }>
 ): Promise<void> => {
   const metadata = await database.listCollections({ name: collection.name }).next();
@@ -62,7 +67,17 @@ const assertCollection = async (
   const actualIndexes = await collection.readIndexes();
   for (const expected of collection.indexes) {
     const actual = actualIndexes.find(({ name }) => name === expected.options.name);
-    if (!actual || !isDeepStrictEqual(actual.key, expected.keys)
+    const expectedKeys = isRecord(expected.keys) ? expected.keys : {};
+    const textFields = Object.entries(expectedKeys)
+      .filter(([, value]) => value === "text")
+      .map(([field]) => field);
+    const keyMatches = actual && textFields.length > 0
+      ? isRecord(actual.key)
+        && actual.key._fts === "text"
+        && actual.key._ftsx === 1
+        && isDeepStrictEqual(actual.weights, Object.fromEntries(textFields.map((field) => [field, 1])))
+      : actual && isDeepStrictEqual(actual.key, expectedKeys);
+    if (!actual || !keyMatches
       || Boolean(actual.unique) !== expected.options.unique) {
       throw storageUnavailable;
     }
@@ -75,9 +90,10 @@ export const createMongoDirectMessageStorage = (
 ): DirectMessageStorage => {
   const conversations = database.collection<DirectConversationDocument>(DIRECT_CONVERSATIONS_COLLECTION);
   const messages = database.collection<DirectMessageDocument>(DIRECT_MESSAGES_COLLECTION);
+  let readiness: Promise<void> | null = null;
   const ensureReady = async (): Promise<void> => {
-    try {
-      await Promise.all([
+    if (!readiness) {
+      readiness = Promise.all([
         assertCollection(database, {
           name: DIRECT_CONVERSATIONS_COLLECTION,
           validator: DIRECT_CONVERSATIONS_COLLECTION_VALIDATOR,
@@ -90,9 +106,16 @@ export const createMongoDirectMessageStorage = (
           indexes: DIRECT_MESSAGES_INDEXES,
           readIndexes: () => messages.indexes()
         })
-      ]);
+      ]).then(() => undefined).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      });
+    }
+    const currentReadiness = readiness;
+    try {
+      await currentReadiness;
     } catch (error: unknown) {
-      if (isUnsupportedTransaction(error)) throw storageUnavailable;
+      if (readiness === currentReadiness) readiness = null;
       throw error;
     }
   };
@@ -188,6 +211,26 @@ export const createMongoDirectMessageStorage = (
         if (isUnsupportedTransaction(error)) throw storageUnavailable;
         throw error;
       }
+    },
+    findAttachmentForMember: async (workspaceId, conversationId, userId, messageId, attachmentId) => {
+      await ensureReady();
+      return withTransaction(async (session) => {
+        const conversation = await conversations.findOne({
+          _id: conversationId,
+          workspaceId,
+          participantIds: userId
+        }, { session });
+        if (!conversation) return null;
+        const message = await messages.findOne({
+          _id: messageId,
+          workspaceId,
+          conversationId
+        }, { session });
+        return message?.attachments?.find(({ id }) => id === attachmentId) ?? null;
+      }).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      });
     }
   });
 };

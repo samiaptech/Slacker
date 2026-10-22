@@ -16,7 +16,13 @@ test("managed TruffleHog detects and safely normalizes a generated credential fi
     publicKeyEncoding: { type: "spki", format: "pem" }
   });
   await writeFile(path.join(fixtureRoot, "generated-private-key.pem"), privateKey, { mode: 0o600 });
-  await writeFile(path.join(fixtureRoot, ".trufflehog-exclude-paths.txt"), "a^\n", "utf8");
+  await writeFile(path.join(fixtureRoot, ".env"), privateKey, { mode: 0o600 });
+  await writeFile(path.join(fixtureRoot, ".env.local"), privateKey, { mode: 0o600 });
+  await writeFile(
+    path.join(fixtureRoot, ".trufflehog-exclude-paths.txt"),
+    "(^|[\\\\/])\\.env(?:\\.local)?$\n",
+    "utf8"
+  );
 
   const tool = await ensureManagedTruffleHog({ workspaceRoot: process.cwd(), requiredVersion: "3.97.5" });
   const scan = await runTruffleHogScan({
@@ -32,5 +38,6 @@ test("managed TruffleHog detects and safely normalizes a generated credential fi
   assert.equal(scan.result.scanStatus, "findings");
   assert.equal(scan.result.exitCode, 183);
   assert.ok(scan.result.findingCount > 0);
+  assert.equal(scan.issues.every(({ file }) => !/(^|[\\/])\.env(?:\.local)?$/.test(file)), true);
   assert.equal(JSON.stringify(scan).includes(privateKey.slice(32, 72)), false);
 });

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { ArrowLeft, BadgeCheck, Copy, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import { Button, Input, Label } from "@workspace/ui";
 import { z } from "zod";
 import type { WorkspaceEmailVisibilityResponse, WorkspaceInviteLinkResponse } from "@workspace/types";
@@ -219,121 +220,121 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
   };
 
   return (
-    <main aria-labelledby="profile-title" className="mx-auto w-full max-w-2xl space-y-8 py-8">
-      <header>
-        <p className="text-sm font-medium text-primary">Account</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground" id="profile-title">Your profile</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Manage your profile and workspace settings for {activeWorkspace.name}.</p>
+    <main aria-labelledby="profile-title" className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-7 sm:py-9">
+      <Link className="inline-flex items-center gap-2 rounded-lg text-sm font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="/">
+        <ArrowLeft aria-hidden="true" className="size-4" /> Back to workspace
+      </Link>
+
+      <header className="relative isolate overflow-hidden rounded-3xl bg-[#173b3a] p-6 text-white shadow-lg shadow-[#173b3a]/10 sm:p-9">
+        <div aria-hidden="true" className="absolute -right-12 -top-24 -z-10 size-72 rounded-full border-[32px] border-white/[0.04]" />
+        <div aria-hidden="true" className="absolute -bottom-28 right-24 -z-10 size-56 rounded-full bg-[#b8e3d1]/10 blur-2xl" />
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+          <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/20 bg-[#b8e3d1] text-3xl font-semibold text-[#173b3a] shadow-xl shadow-black/10">
+            {currentUser.image ? (
+              <Image alt="" className="size-full object-cover" height={96} src={currentUser.image} unoptimized width={96} />
+            ) : (currentUser.name || currentUser.email).slice(0, 1).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b8e3d1]">Account profile</p>
+            <h1 className="mt-2 truncate text-3xl font-semibold tracking-tight" id="profile-title">{currentUser.name}</h1>
+            <p className="mt-1 truncate text-sm text-white/65">{currentUser.title || "Add a role or title to introduce yourself"}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.07] px-3 py-1.5 text-sm text-white/80">
+                <Mail aria-hidden="true" className="size-3.5" /> {currentUser.email}
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-[#b8e3d1] px-3 py-1.5 text-sm font-medium text-[#173b3a]">
+                <Users aria-hidden="true" className="size-3.5" /> {activeWorkspace.name}
+              </span>
+            </div>
+          </div>
+          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white/75">
+            <BadgeCheck aria-hidden="true" className="size-4 text-[#b8e3d1]" /> {activeWorkspace.role === "admin" ? "Workspace admin" : "Workspace member"}
+          </span>
+        </div>
       </header>
 
-      <section aria-labelledby="profile-details-title" className="space-y-5 rounded-lg border border-border bg-card p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground" id="profile-details-title">Profile details</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Your profile is used across your workspaces.</p>
-        </div>
-        <div className="flex items-center gap-4">
-          {currentUser.image ? (
-            <Image alt="" className="size-14 rounded-full object-cover" height={56} src={currentUser.image} unoptimized width={56} />
-          ) : (
-            <div aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-muted text-lg font-semibold text-muted-foreground">
-              {(currentUser.name || currentUser.email).slice(0, 1).toUpperCase()}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(19rem,0.8fr)]">
+        <section aria-labelledby="profile-details-title" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
+          <div className="mb-6 flex items-start gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground"><UserRound aria-hidden="true" className="size-5" /></span>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground" id="profile-details-title">Your details</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Choose how teammates see you across Nutshyll.</p>
             </div>
-          )}
-          <div className="min-w-0">
-            <p className="truncate font-medium text-foreground">{currentUser.name}</p>
-            <p className="truncate text-sm text-muted-foreground">{currentUser.email}</p>
           </div>
-        </div>
-        <form className="space-y-3" onSubmit={(event) => void saveName(event)}>
-          <div className="space-y-2">
-            <Label htmlFor="profile-name">Display name</Label>
-            <Input
-              autoComplete="name"
-              id="profile-name"
-              maxLength={80}
-              onChange={(event) => setName(event.currentTarget.value)}
-              required
-              value={name}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="profile-title-field">Role or title</Label>
-            <Input
-              autoComplete="organization-title"
-              id="profile-title-field"
-              maxLength={80}
-              onChange={(event) => setTitle(event.currentTarget.value)}
-              placeholder="e.g. Product Designer"
-              value={title}
-            />
-          </div>
-          <Button disabled={isSavingName || (name.trim() === currentUser.name && title.trim() === (currentUser.title ?? ""))} type="submit">
-            {isSavingName ? "Saving…" : "Save profile"}
-          </Button>
-          {nameMessage ? <p className="text-sm text-muted-foreground" role="status">{nameMessage}</p> : null}
-        </form>
-      </section>
-
-      {activeWorkspace.role === "admin" ? (
-        <>
-        <section aria-labelledby="workspace-email-visibility-title" className="space-y-4 rounded-lg border border-border bg-card p-6">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground" id="workspace-email-visibility-title">Member email visibility</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {memberEmailsVisible
-                ? "Regular members can see each other’s email addresses. Admins can always see member emails."
-                : "Regular members cannot see member email addresses. Admins can still see them."}
-            </p>
-          </div>
-          <Button
-            disabled={isSavingVisibility || isLoadingVisibility || visibilityLoadFailed}
-            onClick={() => void saveMemberEmailVisibility(!memberEmailsVisible)}
-            type="button"
-            variant="outline"
-          >
-            {isLoadingVisibility ? "Loading settings…" : isSavingVisibility ? "Saving…" : memberEmailsVisible ? "Hide emails from members" : "Show emails to members"}
-          </Button>
-          {visibilityMessage ? <p className="text-sm text-muted-foreground" role="status">{visibilityMessage}</p> : null}
+          <form className="space-y-5" onSubmit={(event) => void saveName(event)}>
+            <div className="space-y-2">
+              <Label htmlFor="profile-name">Display name</Label>
+              <Input autoComplete="name" className="h-11 rounded-xl bg-background" id="profile-name" maxLength={80} onChange={(event) => setName(event.currentTarget.value)} required value={name} />
+              <p className="text-xs text-muted-foreground">This is the name shown next to your messages.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="profile-title-field">Role or title <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <Input autoComplete="organization-title" className="h-11 rounded-xl bg-background" id="profile-title-field" maxLength={80} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="e.g. Product Designer" value={title} />
+            </div>
+            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
+              <Button className="rounded-xl px-5" disabled={isSavingName || (name.trim() === currentUser.name && title.trim() === (currentUser.title ?? ""))} type="submit">
+                {isSavingName ? "Saving changes…" : "Save changes"}
+              </Button>
+              {nameMessage ? <p className="text-sm text-muted-foreground" role="status">{nameMessage}</p> : null}
+            </div>
+          </form>
         </section>
-        <section aria-labelledby="workspace-invite-title" className="space-y-4 rounded-lg border border-border bg-card p-6">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground" id="workspace-invite-title">Invite to {activeWorkspace.name}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create a reusable invite link and send it to people you want to add to this workspace. Links expire after seven days.
-            </p>
-          </div>
-          {invite ? (
-            <div className="space-y-3">
-              <Label htmlFor="profile-invite-link">Workspace invite link</Label>
-              <Input id="profile-invite-link" readOnly value={invite.inviteUrl} />
-              <p className="text-xs text-muted-foreground">
-                Expires {new Date(invite.expiresAt).toLocaleString()}.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void copyInviteLink()} type="button">Copy invite link</Button>
-                <Button disabled={isCreatingInvite} onClick={() => void createInviteLink()} type="button" variant="outline">
-                  {isCreatingInvite ? "Creating…" : "Create new link"}
+
+        <div className="space-y-6">
+          {activeWorkspace.role === "admin" ? (
+            <>
+              <section aria-labelledby="workspace-email-visibility-title" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
+                <div className="flex items-start gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef4ef] text-primary"><ShieldCheck aria-hidden="true" className="size-5" /></span>
+                  <div>
+                    <h2 className="font-semibold text-foreground" id="workspace-email-visibility-title">Member privacy</h2>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{memberEmailsVisible
+                      ? "Members can see each other’s email addresses. Admins always have access."
+                      : "Member email addresses are private. Admins always have access."}</p>
+                  </div>
+                </div>
+                <Button className="mt-5 w-full rounded-xl" disabled={isSavingVisibility || isLoadingVisibility || visibilityLoadFailed} onClick={() => void saveMemberEmailVisibility(!memberEmailsVisible)} type="button" variant="outline">
+                  {isLoadingVisibility ? "Loading settings…" : isSavingVisibility ? "Saving…" : memberEmailsVisible ? "Hide emails from members" : "Show emails to members"}
                 </Button>
-              </div>
-            </div>
-          ) : (
-            <Button disabled={isCreatingInvite} onClick={() => void createInviteLink()} type="button">
-              {isCreatingInvite ? "Creating link…" : "Create invite link"}
-            </Button>
-          )}
-          {inviteMessage ? <p className="text-sm text-muted-foreground" role="status">{inviteMessage}</p> : null}
-        </section>
-        </>
-      ) : (
-        <section aria-labelledby="workspace-admin-title" className="rounded-lg border border-border bg-card p-6">
-          <h2 className="text-lg font-semibold text-foreground" id="workspace-admin-title">Workspace invitations</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ask a workspace admin to create an invite link for {activeWorkspace.name}.
-          </p>
-        </section>
-      )}
+                {visibilityMessage ? <p className="mt-3 text-sm text-muted-foreground" role="status">{visibilityMessage}</p> : null}
+              </section>
 
-      <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/">Back to workspace</Link>
+              <section aria-labelledby="workspace-invite-title" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
+                <div className="flex items-start gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef4ef] text-primary"><Users aria-hidden="true" className="size-5" /></span>
+                  <div>
+                    <h2 className="font-semibold text-foreground" id="workspace-invite-title">Grow your workspace</h2>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">Invite teammates to {activeWorkspace.name}. Links stay active for seven days.</p>
+                  </div>
+                </div>
+                {invite ? (
+                  <div className="mt-5 space-y-3">
+                    <Label htmlFor="profile-invite-link">Invite link</Label>
+                    <Input className="h-11 rounded-xl bg-background" id="profile-invite-link" readOnly value={invite.inviteUrl} />
+                    <p className="text-xs text-muted-foreground">Expires {new Date(invite.expiresAt).toLocaleString()}.</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button className="rounded-xl" onClick={() => void copyInviteLink()} type="button"><Copy aria-hidden="true" className="mr-2 size-4" />Copy link</Button>
+                      <Button className="rounded-xl" disabled={isCreatingInvite} onClick={() => void createInviteLink()} type="button" variant="outline">{isCreatingInvite ? "Creating…" : "New link"}</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button className="mt-5 w-full rounded-xl" disabled={isCreatingInvite} onClick={() => void createInviteLink()} type="button">
+                    {isCreatingInvite ? "Creating invite link…" : "Create invite link"}
+                  </Button>
+                )}
+                {inviteMessage ? <p className="mt-3 text-sm text-muted-foreground" role="status">{inviteMessage}</p> : null}
+              </section>
+            </>
+          ) : (
+            <section aria-labelledby="workspace-admin-title" className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-[#eef4ef] text-primary"><ShieldCheck aria-hidden="true" className="size-5" /></span>
+              <h2 className="mt-4 font-semibold text-foreground" id="workspace-admin-title">Workspace settings</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">Ask a workspace admin to manage member privacy or create an invite link for {activeWorkspace.name}.</p>
+            </section>
+          )}
+        </div>
+      </div>
     </main>
   );
 };

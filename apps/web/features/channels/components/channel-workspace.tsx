@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
-import { LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Activity, ChevronDown, Hash, LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, UserRound, Users } from "lucide-react";
 import {
   Button,
   Dialog,
@@ -18,10 +19,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@workspace/ui/primitives";
 import { ChannelCreateDialog } from "./create-channel-dialog";
+import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-provider";
+import { ChannelProfileToggleProvider, useChannelProfileToggle } from "./channel-profile-toggle-context";
 import { directConversationListResponseSchema, directConversationResponseSchema } from "@/features/direct-messages/public";
 import type { DirectConversationView } from "@/features/direct-messages/public";
 import {
@@ -30,7 +34,7 @@ import {
   type ChannelListResponseView,
   type ChannelResponseView
 } from "../types";
-import { useWorkspaceContext } from "@/features/workspace-foundation/public";
+import { useWorkspaceContext, WorkspaceLeaveDialog, WorkspaceLeaveMenuItem } from "@/features/workspace-foundation/public";
 import { workspaceMembersSchema, type WorkspaceMembersView } from "@/features/identity/public";
 
 type ChannelWorkspaceProps = Readonly<{
@@ -41,11 +45,15 @@ type ChannelWorkspaceProps = Readonly<{
 type ChannelListScope = "joined" | "discoverable";
 
 const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps): ReactElement => {
-  const { activeWorkspace, currentUser } = useWorkspaceContext();
+  const { activeWorkspace, currentUser, selectWorkspace, signOut, startCreatingWorkspace, workspaces } = useWorkspaceContext();
+  const profileToggle = useChannelProfileToggle();
   const realtime = useChannelRealtime();
   const pathname = usePathname();
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isLeaveWorkspaceOpen, setIsLeaveWorkspaceOpen] = useState(false);
   const [scope, setScope] = useState<ChannelListScope>("joined");
   const [channelList, setChannelList] = useState<ChannelListResponseView["channels"]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -67,6 +75,23 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const [directMessagesReloadToken, setDirectMessagesReloadToken] = useState(0);
   const [openingDirectMessageFor, setOpeningDirectMessageFor] = useState<string | null>(null);
   const [directMessageActionError, setDirectMessageActionError] = useState<string | null>(null);
+  const activeChannel = pathname.startsWith("/channels/")
+    ? channelList.find((channel) => pathname === `/channels/${encodeURIComponent(channel.id)}`)
+    : undefined;
+  const activeConversation = pathname.startsWith("/messages/")
+    ? directConversations.find((conversation) => pathname === `/messages/${encodeURIComponent(conversation.id)}`)
+    : undefined;
+
+  useEffect(() => {
+    const focusNavigationSearch = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", focusNavigationSearch);
+    return () => window.removeEventListener("keydown", focusNavigationSearch);
+  }, []);
 
   useEffect(() => {
     const socket = realtime.socket;
@@ -337,59 +362,124 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   };
 
   return (
-    <div className={`mt-4 grid min-h-[28rem] flex-1 overflow-hidden rounded-lg border border-border bg-background md:min-h-0 ${
-      isSidebarOpen ? "md:grid-cols-[15rem_minmax(0,1fr)]" : "grid-cols-1"
-    }`}>
+    <div className={`workspace-layout ${isSidebarOpen ? "" : "workspace-layout-collapsed"}`}>
+      {isMobileSidebarOpen ? (
+        <button aria-label="Close navigation" className="workspace-layout-backdrop" onClick={() => setIsMobileSidebarOpen(false)} type="button" />
+      ) : null}
+      <aside aria-label="Workspace rail" className="workspace-layout-rail">
+        <Link aria-label="Nutshyll home" className="workspace-rail-logo" href="/">
+          <span aria-hidden="true">n.</span>
+        </Link>
+        <div aria-label="Workspaces" className="workspace-rail-switcher">
+          {workspaces.map((workspace) => (
+            <Button
+              aria-current={workspace.id === activeWorkspace.id ? "true" : undefined}
+              aria-label={`Switch to ${workspace.name}`}
+              className={workspace.id === activeWorkspace.id ? "workspace-rail-workspace is-active" : "workspace-rail-workspace"}
+              key={workspace.id}
+              onClick={() => selectWorkspace(workspace.id)}
+              type="button"
+              variant="ghost"
+            >
+              {workspace.name.trim().slice(0, 1).toUpperCase()}
+            </Button>
+          ))}
+          <Button aria-label="Create workspace" className="workspace-rail-add" onClick={startCreatingWorkspace} size="icon" type="button" variant="ghost">
+            <Plus aria-hidden="true" className="size-5" />
+          </Button>
+          {!isSidebarOpen ? (
+            <Button aria-controls="workspace-channel-sidebar" aria-label="Open sidebar" className="workspace-rail-add" onClick={() => setIsSidebarOpen(true)} size="icon" type="button" variant="ghost">
+              <PanelLeftOpen aria-hidden="true" className="size-4" />
+            </Button>
+          ) : null}
+        </div>
+        <Link aria-label="Open your profile" className="workspace-rail-profile" href="/profile">
+          {(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}
+        </Link>
+      </aside>
       <aside
-        aria-label="Workspace channels"
-        className={isSidebarOpen
-          ? "flex min-w-0 flex-col border-b border-border bg-muted/20 md:min-h-0 md:overflow-y-auto md:border-b-0 md:border-r"
-          : "hidden"}
+        aria-label="Workspace navigation"
+        className={`workspace-layout-sidebar border-r border-white/10 bg-[#173b3a] text-white shadow-2xl ${isMobileSidebarOpen ? "is-mobile-open" : ""} ${isSidebarOpen ? "" : "is-sidebar-collapsed"}`}
         id="workspace-channel-sidebar"
       >
-        <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-4">
-          <h2 className="text-sm font-semibold text-foreground">Channels</h2>
-          <ChannelCreateDialog apiBaseUrl={apiBaseUrl} />
+        <div className="workspace-sidebar-brand">
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold tracking-tight" id="workspace-title">Nutshyll</h1>
+            <p className="mt-0.5 truncate text-xs text-white/55">A little closer, together.</p>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button aria-label={`Workspace options for ${activeWorkspace.name}`} className="workspace-sidebar-workspace-button" size="icon" type="button" variant="ghost">
+                <ChevronDown aria-hidden="true" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60">
+              {workspaces.map((workspace) => (
+                <DropdownMenuItem key={workspace.id} onSelect={() => selectWorkspace(workspace.id)}>
+                  {workspace.name}{workspace.id === activeWorkspace.id ? " · Current" : ""}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onSelect={startCreatingWorkspace}><Plus aria-hidden="true" />New workspace</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <WorkspaceLeaveMenuItem onSelect={() => setIsLeaveWorkspaceOpen(true)} />
+              <DropdownMenuItem onSelect={() => void signOut()}><LogOut aria-hidden="true" />Sign out</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button aria-controls="workspace-channel-sidebar" aria-label="Close sidebar" className="workspace-sidebar-collapse-button" onClick={() => setIsSidebarOpen(false)} size="icon" type="button" variant="ghost">
+            <PanelLeftClose aria-hidden="true" className="size-4" />
+          </Button>
         </div>
-        <Link
-          aria-current={pathname === "/profile" ? "page" : undefined}
-          className={`mx-2 mb-2 rounded-md px-3 py-2 text-sm transition-colors ${
-            pathname === "/profile"
-              ? "bg-accent font-medium text-accent-foreground"
-              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          }`}
-          href={"/profile" as Route}
+        <Button
+          aria-haspopup="dialog"
+          className="workspace-sidebar-search"
+          onClick={() => setIsSearchOpen(true)}
+          type="button"
+          variant="ghost"
         >
-          Profile
-        </Link>
+          <Search aria-hidden="true" className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">Search workspace</span>
+          <kbd aria-hidden="true">Ctrl / ⌘ K</kbd>
+        </Button>
+        <nav aria-label="Workspace" className="workspace-sidebar-primary-nav">
+          <Link aria-current={pathname === "/" ? "page" : undefined} className={`workspace-sidebar-primary-link ${pathname === "/" ? "is-active" : ""}`} href="/" onClick={() => setIsMobileSidebarOpen(false)}>
+            <Activity aria-hidden="true" className="size-4" /> Overview
+          </Link>
+          <Link className="workspace-sidebar-primary-link" href="#workspace-direct-messages">
+            <MessageCircle aria-hidden="true" className="size-4" /> Messages
+          </Link>
+          <Link className="workspace-sidebar-primary-link" href="#workspace-members">
+            <Users aria-hidden="true" className="size-4" /> Members
+          </Link>
+        </nav>
         {directMessageActionError ? (
-          <p className="mx-3 mb-2 text-xs text-destructive" role="alert">{directMessageActionError}</p>
+          <p className="mx-4 mb-2 text-xs text-red-200" role="alert">{directMessageActionError}</p>
         ) : null}
-        <section aria-label="Direct messages" className="border-b border-border px-3 pb-3">
-          <div className="flex items-center justify-between gap-2 py-2">
-            <h3 className="text-sm font-semibold text-foreground">Direct messages</h3>
+        <section aria-label="Direct messages" className="workspace-sidebar-dms mt-4 border-b border-white/10 px-3 pb-4" id="workspace-direct-messages">
+          <div className="flex items-center justify-between gap-2 px-2 py-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Messages</h3>
             <Button
               aria-label="Refresh direct messages"
               disabled={directMessagesLoading}
               onClick={() => setDirectMessagesReloadToken((current) => current + 1)}
-              size="sm"
+              className="size-7 text-white/55 hover:bg-white/10 hover:text-white"
+              size="icon"
               type="button"
               variant="ghost"
             >
-              {directMessagesLoading ? "Loading…" : "Refresh"}
+              <span aria-hidden="true" className="text-lg leading-none">↻</span>
             </Button>
           </div>
           {directMessagesError ? (
             <div className="space-y-2 py-1">
-              <p className="text-xs text-destructive" role="alert">{directMessagesError}</p>
+              <p className="text-xs text-red-200" role="alert">{directMessagesError}</p>
               <Button onClick={() => setDirectMessagesReloadToken((current) => current + 1)} size="sm" type="button" variant="outline">
                 Retry
               </Button>
             </div>
           ) : directMessagesLoading ? (
-            <p className="py-2 text-xs text-muted-foreground" role="status">Loading conversations…</p>
+            <p className="py-2 text-xs text-white/45" role="status">Loading conversations…</p>
           ) : directConversations.length === 0 ? (
-            <p className="py-2 text-xs text-muted-foreground">Select a workspace member below to start a private chat.</p>
+            <p className="py-2 text-xs leading-relaxed text-white/45">Choose a teammate below to start a private chat.</p>
           ) : (
             <ul className="space-y-1">
               {directConversations.map((conversation) => {
@@ -398,14 +488,19 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                   <li key={conversation.id}>
                     <Link
                       aria-current={pathname === href ? "page" : undefined}
-                      className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                      className={`flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors ${
                         pathname === href
-                          ? "bg-accent font-medium text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                          ? "bg-[#b8e3d1]/15 font-medium text-[#d5f3e6]"
+                          : "text-white/70 hover:bg-white/[0.07] hover:text-white"
                       }`}
                       href={href as Route}
+                      onClick={() => setIsMobileSidebarOpen(false)}
                     >
-                      <MessageCircle aria-hidden="true" className="size-4 shrink-0" />
+                      <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-[11px] font-semibold text-[#c8e8d8]">
+                        {conversation.otherParticipant.image
+                          ? <Image alt="" className="size-full object-cover" height={28} src={conversation.otherParticipant.image} unoptimized width={28} />
+                          : conversation.otherParticipant.name.trim().slice(0, 1).toUpperCase()}
+                      </span>
                       <span className="truncate">{conversation.otherParticipant.name}</span>
                     </Link>
                   </li>
@@ -414,29 +509,17 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </ul>
           )}
         </section>
-        <div aria-label="Channel list scope" className="grid grid-cols-2 gap-1 px-3 pb-2" role="group">
-          <Button
-            aria-pressed={scope === "joined"}
-            onClick={() => setScope("joined")}
-            size="sm"
-            type="button"
-            variant={scope === "joined" ? "secondary" : "ghost"}
-          >
-            Your channels
-          </Button>
-          <Button
-            aria-pressed={scope === "discoverable"}
-            onClick={() => setScope("discoverable")}
-            size="sm"
-            type="button"
-            variant={scope === "discoverable" ? "secondary" : "ghost"}
-          >
-            Browse public
-          </Button>
+        <div className="workspace-sidebar-section-heading workspace-channels-heading">
+          <h3>Channels</h3>
+          <ChannelCreateDialog apiBaseUrl={apiBaseUrl} trigger={
+            <Button aria-label="Create channel" className="workspace-sidebar-icon-button" size="icon" type="button" variant="ghost">
+              <Plus aria-hidden="true" className="size-4" />
+            </Button>
+          } />
         </div>
-        <nav aria-label="Channels" className="min-h-0 flex-1 px-2 pb-4">
+        <nav aria-label="Channels" className="workspace-sidebar-channel-list min-h-40 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
           {isLoading ? (
-            <p className="px-2 py-3 text-sm text-muted-foreground" role="status">Loading channels…</p>
+            <p className="px-2 py-3 text-sm text-white/50" role="status">Loading channels…</p>
           ) : errorMessage ? (
             <div className="space-y-2 px-2 py-2">
               <p className="text-sm text-destructive" role="alert">{errorMessage}</p>
@@ -446,7 +529,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </div>
           ) : (
             channelList.length === 0 ? (
-              <p className="px-2 py-3 text-sm text-muted-foreground">
+              <p className="px-2 py-3 text-sm text-white/50">
                 {scope === "joined" ? "No channels yet. Create one to get started." : "No public channels are available to discover."}
               </p>
             ) : (
@@ -461,14 +544,15 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                           <div className="flex min-w-0 items-center gap-1">
                             <Link
                               aria-current={isActive ? "page" : undefined}
-                              className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                              className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors ${
                                 isActive
-                                  ? "bg-accent font-medium text-accent-foreground"
-                                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                                  ? "bg-[#b8e3d1]/15 font-medium text-[#d5f3e6]"
+                                  : "text-white/70 hover:bg-white/[0.07] hover:text-white"
                               }`}
                               href={href as Route}
+                              onClick={() => setIsMobileSidebarOpen(false)}
                             >
-                              <span aria-hidden="true" className="shrink-0">{channel.visibility === "private" ? "lock" : "#"}</span>
+                              <Hash aria-hidden="true" className="size-4 shrink-0 text-white/40" />
                               <span className="truncate">{channel.name}</span>
                             </Link>
                             <DropdownMenu>
@@ -478,6 +562,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                                   disabled={membershipActionId !== null}
                                   size="icon"
                                   type="button"
+                                  className="text-white/50 hover:bg-white/10 hover:text-white"
                                   variant="ghost"
                                 >
                                   <MoreHorizontal aria-hidden="true" className="size-4" />
@@ -499,7 +584,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                         ) : (
                           <div className="min-w-0 rounded-md px-2 py-1.5">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="truncate text-sm font-medium text-foreground"># {channel.name}</p>
+                              <p className="truncate text-sm font-medium text-white"># {channel.name}</p>
                               <Button
                                 disabled={membershipActionId !== null}
                                 onClick={() => void joinChannel(channel.id)}
@@ -537,24 +622,29 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             )
           )}
         </nav>
-        <section aria-label="Workspace members" className="border-t border-border px-3 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-foreground">
+        <Button className="workspace-sidebar-browse" onClick={() => setScope((current) => current === "joined" ? "discoverable" : "joined")} type="button" variant="ghost">
+          <Plus aria-hidden="true" className="size-4" />
+          {scope === "joined" ? "Browse channels" : "Your channels"}
+        </Button>
+        <section aria-label="Workspace members" className="workspace-sidebar-members shrink-0 border-t border-white/10 px-3 py-3" id="workspace-members">
+          <div className="flex items-center justify-between gap-2 px-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">
               Members{!isLoadingMembers && !membersErrorMessage ? ` (${workspaceMembers.length})` : ""}
             </h3>
             <Button
               aria-label="Refresh workspace members"
               disabled={isLoadingMembers}
               onClick={() => setMembersReloadToken((current) => current + 1)}
-              size="sm"
+              className="size-7 text-white/55 hover:bg-white/10 hover:text-white"
+              size="icon"
               type="button"
               variant="ghost"
             >
-              {isLoadingMembers ? "Loading…" : "Refresh"}
+              <span aria-hidden="true" className="text-lg leading-none">↻</span>
             </Button>
           </div>
           {isLoadingMembers ? (
-            <p className="px-2 py-2 text-sm text-muted-foreground" role="status">Loading members…</p>
+            <p className="px-2 py-2 text-sm text-white/50" role="status">Loading members…</p>
           ) : membersErrorMessage ? (
             <div className="space-y-2 px-2 py-2">
               <p className="text-sm text-destructive" role="alert">{membersErrorMessage}</p>
@@ -564,26 +654,28 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </div>
           ) : workspaceMembers.length === 0 ? (
             <p className="px-2 py-2 text-sm text-muted-foreground">No workspace members found.</p>
+          ) : workspaceMembers.length === 0 ? (
+            <p className="px-2 py-2 text-sm text-white/50">No matching people.</p>
           ) : (
             <ul className="max-h-48 space-y-1 overflow-y-auto pt-2">
               {workspaceMembers.map((member) => (
                 <li key={member.id} className="flex items-center gap-1 rounded-md px-2 py-1.5">
                   <Link
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-white/75 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     href={`/members/${encodeURIComponent(member.id)}` as Route}
                   >
                     <span
                       aria-label={realtime.onlineUserIds.includes(member.id) ? "Online" : "Offline"}
                       className={`size-2 shrink-0 rounded-full ${
-                        realtime.onlineUserIds.includes(member.id) ? "bg-emerald-500" : "bg-muted-foreground/40"
+                        realtime.onlineUserIds.includes(member.id) ? "bg-[#80d9aa]" : "bg-white/25"
                       }`}
                       title={realtime.onlineUserIds.includes(member.id) ? "Online" : "Offline"}
                     />
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-foreground">{member.name ?? "Workspace member"}</span>
-                      {member.title ? <span className="block truncate text-xs text-muted-foreground">{member.title}</span> : null}
-                      {member.email ? <span className="block truncate text-xs text-muted-foreground">{member.email}</span> : null}
-                      {member.role === "admin" ? <span className="block text-xs text-muted-foreground">Workspace admin</span> : null}
+                      <span className="block truncate text-sm font-medium">{member.name ?? "Workspace member"}</span>
+                      {member.title ? <span className="block truncate text-xs text-white/45">{member.title}</span> : null}
+                      {member.email ? <span className="block truncate text-xs text-white/45">{member.email}</span> : null}
+                      {member.role === "admin" ? <span className="block text-xs text-white/45">Workspace admin</span> : null}
                     </span>
                   </Link>
                   {member.id !== currentUser.id ? (
@@ -593,6 +685,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                       onClick={() => void openDirectMessage(member.id)}
                       size="icon"
                       type="button"
+                      className="text-white/55 hover:bg-white/10 hover:text-white"
                       variant="ghost"
                     >
                       <MessageCircle aria-hidden="true" className="size-4" />
@@ -603,25 +696,57 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </ul>
           )}
         </section>
-      </aside>
-      <section aria-label="Channel content" className="flex min-w-0 flex-col overflow-y-auto p-3 sm:p-4 md:min-h-0">
-        <div className="mb-2 flex">
-          <Button
-            aria-controls="workspace-channel-sidebar"
-            aria-expanded={isSidebarOpen}
-            aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
-            onClick={() => setIsSidebarOpen((isOpen) => !isOpen)}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            {isSidebarOpen
-              ? <PanelLeftClose aria-hidden="true" className="size-4" />
-              : <PanelLeftOpen aria-hidden="true" className="size-4" />}
-          </Button>
+        <div className="workspace-sidebar-profile mt-auto border-t border-white/10 p-3">
+          <Link aria-current={pathname === "/profile" ? "page" : undefined} className={`flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors ${pathname === "/profile" ? "bg-white/12" : "hover:bg-white/[0.07]"}`} href="/profile" onClick={() => setIsMobileSidebarOpen(false)}>
+            <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#b8e3d1] text-sm font-semibold text-[#173b3a]">{(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-white">{currentUser.name || "Your profile"}</span><span className="block truncate text-xs text-white/50">{activeWorkspace.role === "admin" ? "Workspace admin" : "Workspace member"}</span></span>
+            <UserRound aria-hidden="true" className="size-4 text-white/50" />
+          </Link>
         </div>
-        {children}
+      </aside>
+      <div className="workspace-layout-content">
+      <section aria-label="Channel content" className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="workspace-main-header">
+          <Button aria-controls="workspace-channel-sidebar" aria-expanded={isMobileSidebarOpen} aria-label={isMobileSidebarOpen ? "Close navigation" : "Open navigation"} className="workspace-toggle-mobile" onClick={() => setIsMobileSidebarOpen((isOpen) => !isOpen)} size="icon" type="button" variant="ghost">
+            <PanelLeftOpen aria-hidden="true" className="size-4" />
+          </Button>
+          <Button aria-controls="workspace-channel-sidebar" aria-expanded={isSidebarOpen} aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"} className="workspace-toggle-desktop" onClick={() => setIsSidebarOpen((isOpen) => !isOpen)} size="icon" type="button" variant="ghost">
+            {isSidebarOpen ? <PanelLeftClose aria-hidden="true" className="size-4" /> : <PanelLeftOpen aria-hidden="true" className="size-4" />}
+          </Button>
+          <div className="workspace-main-header-copy">
+            <h2 className="workspace-main-header-title">
+              {activeChannel ? (
+                <button
+                  aria-controls="channel-profile-panel channel-profile-mobile"
+                  aria-expanded={profileToggle.isOpen}
+                  aria-label={`${profileToggle.isOpen ? "Hide" : "Show"} about #${activeChannel.name}`}
+                  className="inline-flex min-w-0 items-center gap-2 rounded-md text-left transition-colors hover:text-[#507b68] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9bc3ad]"
+                  onClick={profileToggle.toggle}
+                  type="button"
+                >
+                  <Hash aria-hidden="true" className="size-4 shrink-0 text-[#74877e]" />
+                  <span className="truncate">{activeChannel.name}</span>
+                  <ChevronDown aria-hidden="true" className={`size-3.5 shrink-0 transition-transform duration-200 ${profileToggle.isOpen ? "rotate-180" : ""}`} />
+                </button>
+              ) : activeConversation?.otherParticipant.name ?? (pathname === "/profile" ? "Your profile" : "Workspace")}
+            </h2>
+            <p className="workspace-main-header-subtitle">{activeChannel?.description || (activeChannel ? activeChannel.name.toLocaleLowerCase() === "general" ? "The everyday, the big ideas, and everything in between." : `${activeChannel.visibility === "public" ? "Public" : "Private"} channel · Team conversation` : activeConversation ? "Direct message" : "Your team space")}</p>
+          </div>
+          <Link aria-label="Open your profile" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#d8ebe2] text-sm font-semibold text-[#244b43]" href="/profile" onClick={() => setIsMobileSidebarOpen(false)}>{(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}</Link>
+        </header>
+        <div className={`flex min-h-0 flex-1 flex-col ${pathname === "/profile" || pathname.startsWith("/members/") ? "overflow-y-auto p-4 sm:p-6" : "overflow-hidden"}`}>{children}</div>
       </section>
+      </div>
+      <WorkspaceSearchDialog
+        apiBaseUrl={apiBaseUrl}
+        channels={channelList}
+        conversations={directConversations}
+        members={workspaceMembers}
+        onOpenChange={setIsSearchOpen}
+        open={isSearchOpen}
+        workspaceId={activeWorkspace.id}
+      />
+      <WorkspaceLeaveDialog onOpenChange={setIsLeaveWorkspaceOpen} open={isLeaveWorkspaceOpen} />
       <Dialog
         onOpenChange={(open) => { if (!open && membershipActionId === null) setChannelToLeave(null); }}
         open={channelToLeave !== null}
@@ -656,8 +781,10 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
 export const ChannelWorkspace = ({ apiBaseUrl, children }: ChannelWorkspaceProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
   return (
-    <ChannelRealtimeProvider apiBaseUrl={apiBaseUrl} workspaceId={activeWorkspace.id}>
-      <ChannelWorkspaceContent apiBaseUrl={apiBaseUrl}>{children}</ChannelWorkspaceContent>
-    </ChannelRealtimeProvider>
+    <ChannelProfileToggleProvider>
+      <ChannelRealtimeProvider apiBaseUrl={apiBaseUrl} workspaceId={activeWorkspace.id}>
+        <ChannelWorkspaceContent apiBaseUrl={apiBaseUrl}>{children}</ChannelWorkspaceContent>
+      </ChannelRealtimeProvider>
+    </ChannelProfileToggleProvider>
   );
 };

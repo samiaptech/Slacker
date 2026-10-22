@@ -259,7 +259,7 @@ export const createWorkspaceService = ({
     role: "admin" | "member"
   ): Promise<WorkspaceMemberRoleResult> => {
     if (!identity) return Object.freeze({ kind: "unauthenticated" });
-    if (!workspaceId || identity.id === memberId) return Object.freeze({ kind: "denied" });
+    if (!workspaceId) return Object.freeze({ kind: "denied" });
     try {
       const result: WorkspaceRepositoryMemberMutationResult =
         await repository.changeMemberRole(workspaceId, identity.id, memberId, role);
@@ -278,7 +278,7 @@ export const createWorkspaceService = ({
     memberId: string
   ): Promise<WorkspaceMemberRemovalResult> => {
     if (!identity) return Object.freeze({ kind: "unauthenticated" });
-    if (!workspaceId || identity.id === memberId) return Object.freeze({ kind: "denied" });
+    if (!workspaceId) return Object.freeze({ kind: "denied" });
     try {
       const result: WorkspaceRepositoryMemberMutationResult =
         await repository.removeMember(workspaceId, identity.id, memberId);

@@ -1,8 +1,7 @@
 "use client";
 
-import Image from "next/image";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
-import { RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
+import { FileText, Paperclip, Pin, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
 import { Button, Textarea } from "@workspace/ui";
 import {
   channelMessageListResponseSchema,
@@ -11,12 +10,24 @@ import {
 } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
+import { ChannelMessageItem } from "./channel-message-item";
+import {
+  captureHistoryScrollAnchor,
+  restoreHistoryScrollAnchor,
+  type HistoryScrollAnchor
+} from "@/features/conversation-history/public";
+import { useMessageSearchJump } from "@/features/message-search/public";
 
 const MESSAGE_PAGE_SIZE = 50;
+const MAX_ATTACHMENT_COUNT = 5;
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.csv,.md";
 
 type ChannelMessagesProps = Readonly<{
   apiBaseUrl: string;
   channelId: string;
+  channelName: string;
+  channelDescription: string | null;
   canSend: boolean;
 }>;
 
@@ -31,18 +42,22 @@ const mergeMessages = (
   );
 };
 
-const formatMessageTime = (value: string): string =>
-  new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const formatFileSize = (size: number): string => size < 1024 * 1024
+  ? `${Math.max(1, Math.round(size / 1024))} KB`
+  : `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
-const getInitials = (name: string): string =>
-  name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?";
-
-export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessagesProps): ReactElement => {
+export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDescription, canSend }: ChannelMessagesProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
   const realtime = useChannelRealtime();
   const [messages, setMessages] = useState<readonly ChannelMessageView[]>([]);
+  const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<readonly File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentActionError, setAttachmentActionError] = useState<string | null>(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -53,12 +68,22 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
   const hasReceivedChannelReadyRef = useRef(false);
   const [olderError, setOlderError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<readonly string[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const historyAnchorRef = useRef<HistoryScrollAnchor | null>(null);
+  const messageTimeline = useMemo(() => messages.map((message, index) => {
+    const previousMessage = messages[index - 1];
+    return {
+      message,
+      startsNewDay: !previousMessage || new Date(previousMessage.createdAt).toDateString() !== new Date(message.createdAt).toDateString()
+    };
+  }), [messages]);
   const bottomRef = useRef<HTMLLIElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingUsersTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const isTypingRef = useRef(false);
   const shouldScrollToBottom = useRef(true);
   const revokeAccess = useCallback((): void => {
+    historyAnchorRef.current = null;
     if (isTypingRef.current) {
       realtime.socket?.emit("channel:typing", { channelId, active: false });
       isTypingRef.current = false;
@@ -67,11 +92,13 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
     setMessages([]);
     setNextCursor(null);
     setDraft("");
+    setSelectedFiles([]);
   }, [channelId, realtime.socket]);
 
   useEffect(() => {
     const controller = new AbortController();
     const loadMessages = async (): Promise<void> => {
+      historyAnchorRef.current = null;
       setIsLoading(true);
       setLoadError(null);
       setAccessRevoked(false);
@@ -102,6 +129,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
         }
         setMessages(parsed.data.messages);
         setNextCursor(parsed.data.nextCursor);
+        setLoadedChannelId(channelId);
         shouldScrollToBottom.current = true;
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -121,6 +149,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
   useEffect(() => {
     const socket = realtime.socket;
     if (!socket) return;
+    const typingUserTimeouts = typingUsersTimeoutsRef.current;
     const subscribe = (): void => { socket.emit("channel:subscribe", channelId); };
     const onChannelReady = (ready: Readonly<{ channelId: string }>): void => {
       if (ready.channelId !== channelId) return;
@@ -147,19 +176,19 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
     };
     const onTyping = (change: Readonly<{ channelId: string; userId: string; active: boolean }>): void => {
       if (change.channelId !== channelId) return;
-      const existingTimeout = typingUsersTimeoutsRef.current.get(change.userId);
+      const existingTimeout = typingUserTimeouts.get(change.userId);
       if (existingTimeout) clearTimeout(existingTimeout);
       if (!change.active) {
-        typingUsersTimeoutsRef.current.delete(change.userId);
+        typingUserTimeouts.delete(change.userId);
         setTypingUsers((current) => current.filter((userId) => userId !== change.userId));
         return;
       }
       setTypingUsers((current) => current.includes(change.userId) ? current : [...current, change.userId]);
       const timeout = setTimeout(() => {
-        typingUsersTimeoutsRef.current.delete(change.userId);
+        typingUserTimeouts.delete(change.userId);
         setTypingUsers((current) => current.filter((userId) => userId !== change.userId));
       }, 2_500);
-      typingUsersTimeoutsRef.current.set(change.userId, timeout);
+      typingUserTimeouts.set(change.userId, timeout);
     };
     socket.on("channel:ready", onChannelReady);
     socket.on("channel:message:new", onMessage);
@@ -175,18 +204,26 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
       socket.off("channel:typing", onTyping);
       if (socket.connected && realtime.workspaceReady) socket.emit("channel:unsubscribe", channelId);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingUsersTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
-      typingUsersTimeoutsRef.current.clear();
+      typingUserTimeouts.forEach((timeout) => clearTimeout(timeout));
+      typingUserTimeouts.clear();
       setTypingUsers([]);
     };
   }, [activeWorkspace.id, channelId, realtime.socket, realtime.workspaceReady, revokeAccess]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current;
+    const container = scrollContainerRef.current;
+    if (anchor && container) {
+      restoreHistoryScrollAnchor(container, anchor);
+      historyAnchorRef.current = null;
+      shouldScrollToBottom.current = false;
+      return;
+    }
     if (shouldScrollToBottom.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     shouldScrollToBottom.current = false;
   }, [messages]);
 
-  const loadOlderMessages = async (): Promise<void> => {
+  const loadOlderMessages = useCallback(async (): Promise<void> => {
     if (!nextCursor || isLoadingOlder) return;
     setIsLoadingOlder(true);
     setOlderError(null);
@@ -212,6 +249,8 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
         setOlderError("The server returned an invalid message page.");
         return;
       }
+      const container = scrollContainerRef.current;
+      historyAnchorRef.current = container ? captureHistoryScrollAnchor(container) : null;
       setMessages((current) => mergeMessages(parsed.data.messages, current));
       setNextCursor(parsed.data.nextCursor);
     } catch {
@@ -219,21 +258,32 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
     } finally {
       setIsLoadingOlder(false);
     }
-  };
+  }, [activeWorkspace.id, apiBaseUrl, channelId, isLoadingOlder, nextCursor, revokeAccess]);
 
   const sendMessage = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const text = draft;
-    if (!text.trim() || isSending || !canSend || accessRevoked) return;
+    if ((!text.trim() && selectedFiles.length === 0) || isSending || !canSend || accessRevoked) return;
     setIsSending(true);
     setSendError(null);
     try {
+      const headers: Record<string, string> = { "X-Workspace-Id": activeWorkspace.id };
+      let body: BodyInit;
+      if (selectedFiles.length > 0) {
+        const formData = new FormData();
+        if (text.trim()) formData.set("text", text);
+        selectedFiles.forEach((file) => formData.append("files", file));
+        body = formData;
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify({ text });
+      }
       const response = await fetch(new URL(`/channels/${encodeURIComponent(channelId)}/messages`, apiBaseUrl), {
         method: "POST",
         credentials: "include",
         cache: "no-store",
-        headers: { "Content-Type": "application/json", "X-Workspace-Id": activeWorkspace.id },
-        body: JSON.stringify({ text })
+        headers,
+        body
       });
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) revokeAccess();
@@ -254,12 +304,73 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
       shouldScrollToBottom.current = true;
       setMessages((current) => mergeMessages(current, [parsed.data]));
       setDraft("");
+      setSelectedFiles([]);
+      setAttachmentError(null);
     } catch {
       setSendError("Your message could not be sent. Check your connection and try again.");
     } finally {
       setIsSending(false);
     }
   };
+
+  const addAttachments = (event: ChangeEvent<HTMLInputElement>): void => {
+    const incoming = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (incoming.length === 0) return;
+    if (selectedFiles.length + incoming.length > MAX_ATTACHMENT_COUNT) {
+      setAttachmentError(`Choose up to ${MAX_ATTACHMENT_COUNT} files per message.`);
+      return;
+    }
+    const invalidFile = incoming.find((file) => file.size > MAX_ATTACHMENT_SIZE || !ATTACHMENT_ACCEPT.split(",").some((extension) => file.name.toLocaleLowerCase().endsWith(extension)));
+    if (invalidFile) {
+      setAttachmentError(invalidFile.size > MAX_ATTACHMENT_SIZE
+        ? `${invalidFile.name} is larger than 10 MB.`
+        : `${invalidFile.name} is not a supported file type.`);
+      return;
+    }
+    setAttachmentError(null);
+    setSelectedFiles((current) => [...current, ...incoming]);
+  };
+
+  const downloadAttachment = useCallback(async (attachment: NonNullable<ChannelMessageView["attachments"]>[number]): Promise<void> => {
+    if (downloadingAttachmentId) return;
+    setDownloadingAttachmentId(attachment.id);
+    setAttachmentActionError(null);
+    try {
+      const downloadUrl = new URL(attachment.downloadUrl, apiBaseUrl);
+      if (downloadUrl.origin !== new URL(apiBaseUrl).origin) throw new Error("This file has an invalid download location.");
+      const response = await fetch(downloadUrl, {
+        credentials: "include",
+        cache: "no-store",
+        headers: { "X-Workspace-Id": activeWorkspace.id }
+      });
+      if (!response.ok) throw new Error("This file is unavailable or you no longer have access to it.");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = attachment.name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch (error: unknown) {
+      setAttachmentActionError(error instanceof Error ? error.message : "The file could not be downloaded.");
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  }, [activeWorkspace.id, apiBaseUrl, downloadingAttachmentId]);
+
+  const searchJump = useMessageSearchJump({
+    type: "channel",
+    conversationId: channelId,
+    messages,
+    containerRef: scrollContainerRef,
+    isLoading: isLoading || loadedChannelId !== channelId,
+    isLoadingOlder,
+    hasMore: nextCursor !== null,
+    olderError,
+    loadOlder: loadOlderMessages
+  });
 
   const updateTyping = (text: string): void => {
     const socket = realtime.socket;
@@ -295,36 +406,30 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
   };
 
   return (
-    <section aria-labelledby="channel-conversation-title" className="flex min-h-[28rem] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/20 px-5 py-4 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-lg font-semibold text-primary">#</div>
-          <div>
-            <h2 className="font-semibold text-foreground" id="channel-conversation-title">Conversation</h2>
-            <p className="text-xs text-muted-foreground">Messages are visible to current channel members</p>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground" role="status">
+    <section aria-label="Channel conversation" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf8]">
+      <p aria-live="polite" className="sr-only" role="status">{searchJump.announcement}</p>
+      <header className="flex shrink-0 items-center gap-3 border-b border-[#e9e7e1] px-5 py-2.5 sm:px-6">
+        <p className="ml-auto flex items-center gap-2 text-xs text-[#74817b]" role="status">
+          <span aria-hidden="true" className={`size-2 rounded-full ${realtime.workspaceReady ? "bg-emerald-500" : "bg-amber-400"}`} />
           {realtime.workspaceReady
-            ? "Live"
-            : realtime.errorMessage ?? (realtime.status === "connected"
-              ? "Connecting live chat…"
-              : "Reconnecting to live chat…")}
+            ? channelName.toLocaleLowerCase() === "general" ? "Live" : "Live updates"
+            : realtime.errorMessage ?? (realtime.status === "connected" ? "Connecting live chat…" : "Reconnecting to live chat…")}
         </p>
-        <Button
-          aria-label="Refresh messages"
-          disabled={isLoading}
-          onClick={() => setReloadToken((current) => current + 1)}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <RefreshCw aria-hidden="true" className="mr-2 size-4" />
-          Refresh
+        <Button aria-label="Refresh messages" className="size-8 text-[#687a72] hover:bg-[#eef3ef]" disabled={isLoading} onClick={() => setReloadToken((current) => current + 1)} size="icon" type="button" variant="ghost">
+          <RefreshCw aria-hidden="true" className="size-4" />
         </Button>
       </header>
+      {channelName.toLocaleLowerCase() === "general" ? (
+        <div className="flex shrink-0 items-center gap-3 border-b border-[#e2e9e1] bg-[#f1f5ef] px-8 py-2">
+          <Pin aria-hidden="true" className="size-4 shrink-0 text-[#507b68]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#29463e]">Team hub</p>
+            <p className="truncate text-xs text-[#6a7b72]">{channelDescription || "Everything you need to feel at home here."}</p>
+          </div>
+        </div>
+      ) : null}
 
-      <div aria-live="polite" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6">
+      <div aria-live="polite" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-2 sm:px-8 sm:py-2" ref={scrollContainerRef}>
         {isLoading ? (
           <p className="m-auto text-sm text-muted-foreground" role="status">Loading your conversation…</p>
         ) : loadError ? (
@@ -349,22 +454,16 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
                 <p className="mt-1 text-sm text-muted-foreground">Send the first message to get the conversation going.</p>
               </div>
             ) : (
-              <ol aria-label="Channel messages" className="mt-auto space-y-5">
-                {messages.map((message) => (
-                  <li className="flex items-start gap-3" key={message.id}>
-                    <div aria-hidden="true" className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                      {message.sender.image
-                        ? <Image alt="" className="object-cover" height={36} src={message.sender.image} unoptimized width={36} />
-                        : getInitials(message.sender.name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
-                        <time className="text-xs text-muted-foreground" dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
-                      </div>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
-                    </div>
-                  </li>
+              <ol aria-label="Channel messages" className="space-y-3">
+                {messageTimeline.map(({ message, startsNewDay }) => (
+                  <ChannelMessageItem
+                    key={message.id}
+                    downloadingAttachmentId={downloadingAttachmentId}
+                    isDownloadBusy={downloadingAttachmentId !== null}
+                    message={message}
+                    onDownloadAttachment={downloadAttachment}
+                    startsNewDay={startsNewDay}
+                  />
                 ))}
                 <li aria-hidden="true" className="h-px" ref={bottomRef} />
               </ol>
@@ -378,11 +477,26 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
         </p>
       ) : null}
 
-      <div className="border-t border-border bg-background/70 p-4 sm:px-6">
+      <div className="shrink-0 border-t border-[#e9e7e1] bg-white/75 px-6 py-4 sm:px-8">
         {canSend && !accessRevoked ? (
           <form className="space-y-2" onSubmit={(event) => void sendMessage(event)}>
             <label className="sr-only" htmlFor="channel-message-draft">Write a message</label>
+            <input accept={ATTACHMENT_ACCEPT} className="hidden" multiple onChange={addAttachments} ref={attachmentInputRef} type="file" />
+            {selectedFiles.length > 0 ? (
+              <ul aria-label="Files to attach" className="flex flex-wrap gap-2 px-1">
+                {selectedFiles.map((file, index) => (
+                  <li className="flex max-w-full items-center gap-2 rounded-lg border border-border bg-background px-2 py-1 text-xs" key={`${file.name}-${file.lastModified}-${index}`}>
+                    <FileText aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                    <span className="max-w-48 truncate">{file.name}</span><span className="text-muted-foreground">{formatFileSize(file.size)}</span>
+                    <Button aria-label={`Remove ${file.name}`} className="size-6 shrink-0" onClick={() => setSelectedFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))} size="icon" type="button" variant="ghost"><X aria-hidden="true" className="size-3" /></Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="flex items-end gap-2 rounded-2xl border border-input bg-background p-2 shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+              <Button aria-label="Attach files" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={() => attachmentInputRef.current?.click()} size="icon" type="button" variant="ghost">
+                <Paperclip aria-hidden="true" className="size-4" />
+              </Button>
               <Textarea
                 className="max-h-36 min-h-12 resize-none border-0 shadow-none focus-visible:ring-0"
                 disabled={isSending || isLoading || Boolean(loadError)}
@@ -396,20 +510,21 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, canSend }: ChannelMessa
                 }}
                 onBlur={stopTyping}
                 onKeyDown={handleComposerKeyDown}
-                placeholder="Message this channel…"
+                placeholder={`Message #${channelName}…`}
                 rows={1}
                 value={draft}
               />
-              <Button aria-label="Send message" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={!draft.trim() || isSending || isLoading || Boolean(loadError)} size="icon" type="submit">
+              <Button aria-label="Send message" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={(!draft.trim() && selectedFiles.length === 0) || isSending || isLoading || Boolean(loadError)} size="icon" type="submit">
                 <Send aria-hidden="true" className="size-4" />
               </Button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-              {sendError
-                ? <p className="text-xs text-destructive" role="alert">{sendError}</p>
+              {sendError || attachmentError || attachmentActionError
+                ? <p className="text-xs text-destructive" role="alert">{sendError ?? attachmentError ?? attachmentActionError}</p>
                 : <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck aria-hidden="true" className="size-3.5" />Only current channel members can read or send messages.</p>}
               <span className="ml-auto text-xs text-muted-foreground">{Array.from(draft).length}/{4_000} · Enter to send, Shift+Enter for a new line</span>
             </div>
+            <p className="px-1 text-[10px] text-muted-foreground">Up to 5 files, 10 MB each · JPG, PNG, GIF, WebP, PDF, TXT, CSV, MD</p>
           </form>
         ) : (
           <p className="text-center text-sm text-muted-foreground" role="status">

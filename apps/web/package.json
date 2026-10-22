@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/workspace-response.test.ts tests/channels.test.ts tests/channel-submission.test.ts",
+    "test": "tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/workspace-response.test.ts tests/channels.test.ts tests/channel-submission.test.ts tests/conversation-history.test.ts tests/message-search.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

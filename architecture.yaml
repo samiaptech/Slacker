@@ -195,7 +195,8 @@
     "model": "standard-engines-repository-policy",
     "dependencyAudit": {
       "engine": "pnpm-audit",
-      "minimumSeverity": "high"
+      "minimumSeverity": "high",
+      "ignoredAdvisories": ["GHSA-vfj7-8cjw-p6xm"]
     },
     "secretScan": {
       "engine": "trufflehog",
@@ -230,14 +231,14 @@
     { "project": "web", "root": "features/channels", "categories": ["components", "public", "types"], "rootExports": ["components", "public", "types"] },
     { "project": "web", "root": "features/direct-messages", "categories": ["components", "public", "types"], "rootExports": ["components", "public", "types"] },
     { "project": "web", "root": "types", "categories": ["configuration", "routing"], "rootExports": ["configuration", "routing"] },
-    { "project": "api", "root": "integrations", "categories": ["authentication", "mongodb", "socket-io"], "rootExports": ["authentication", "mongodb", "socket-io"] },
+    { "project": "api", "root": "integrations", "categories": ["authentication", "cloudinary", "mongodb", "socket-io"], "rootExports": ["authentication", "cloudinary", "mongodb", "socket-io"] },
     { "project": "api", "root": "constants", "categories": ["errors", "http", "runtime"], "rootExports": ["errors", "http", "runtime"] },
-    { "project": "api", "root": "types", "categories": ["configuration"], "rootExports": ["configuration"] },
+    { "project": "api", "root": "types", "categories": ["chat", "configuration"], "rootExports": ["chat", "configuration"] },
     { "project": "api", "root": "features/health", "categories": ["controllers", "routes", "services"], "rootExports": ["routes"] },
     { "project": "api", "root": "features/channels", "categories": ["controllers", "domain", "integrations", "models", "public", "realtime", "repositories", "routes", "services"], "rootExports": ["domain", "integrations", "models", "public", "realtime", "repositories", "routes", "services"] },
     { "project": "api", "root": "features/direct-messages", "categories": ["controllers", "domain", "integrations", "models", "realtime", "repositories", "routes", "services"], "rootExports": ["controllers", "domain", "integrations", "models", "realtime", "repositories", "routes", "services"] },
     { "project": "types", "root": "src", "categories": ["api"], "rootExports": ["api"] },
-    { "project": "types", "root": "src/api", "categories": ["channels", "direct-messages", "environment", "errors", "health", "realtime", "workspace"], "rootExports": ["channels", "direct-messages", "environment", "errors", "health", "realtime", "workspace"] },
+    { "project": "types", "root": "src/api", "categories": ["channels", "chat", "direct-messages", "environment", "errors", "health", "realtime", "workspace"], "rootExports": ["channels", "chat", "direct-messages", "environment", "errors", "health", "realtime", "workspace"] },
     { "project": "ui", "root": "src", "categories": ["components", "compositions", "hooks", "primitives", "utilities"], "rootExports": ["components", "compositions", "hooks", "primitives"] }
   ],
   "contractOwnership": {

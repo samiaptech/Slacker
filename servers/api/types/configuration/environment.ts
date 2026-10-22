@@ -14,4 +14,7 @@ export type ValidatedApiEnvironment = Readonly<{
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   LOG_LEVEL: LogLevel;
+  CLOUDINARY_CLOUD_NAME?: string | undefined;
+  CLOUDINARY_API_KEY?: string | undefined;
+  CLOUDINARY_API_SECRET?: string | undefined;
 }>;

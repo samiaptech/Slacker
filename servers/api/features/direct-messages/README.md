@@ -40,6 +40,10 @@ supports transactions. The collections use strict document validators; the API
 returns `direct_message_storage_unavailable` if validators or indexes are
 missing or incompatible.
 
+The initializer also installs `direct_messages_text` for permission-aware
+workspace message search. Run it after deployment before enabling search; the
+search API fails explicitly while either channel or DM text index is missing.
+
 ## Live delivery
 
 Socket.IO authenticates with the same session as channel chat. A client must

@@ -19,6 +19,7 @@ export type {
 } from "./services/index.js";
 export type { WorkspaceRealtimeNotifications } from "./controllers/index.js";
 export { createMongoWorkspaceStorage } from "./integrations/index.js";
+export type { WorkspaceLeaveCleanup } from "./integrations/index.js";
 export { createWorkspaceRepository } from "./repositories/index.js";
 export type {
   WorkspaceMemberMutationResult,

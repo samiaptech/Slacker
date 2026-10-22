@@ -202,6 +202,12 @@ export const validateArchitectureConfiguration = (architecture) => {
       || !["low", "moderate", "high", "critical"].includes(security.dependencyAudit?.minimumSeverity)) {
       issues.push({ level: "error", message: "Architecture dependency security must configure pnpm audit with a valid minimum severity." });
     }
+    if (security.dependencyAudit?.ignoredAdvisories !== undefined
+      && (!Array.isArray(security.dependencyAudit.ignoredAdvisories)
+        || security.dependencyAudit.ignoredAdvisories.some((advisory) =>
+          typeof advisory !== "string" || !/^GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}$/.test(advisory)))) {
+      issues.push({ level: "error", message: "Architecture dependency security ignoredAdvisories must contain valid GitHub advisory IDs." });
+    }
     if (security.secretScan?.engine !== "trufflehog"
       || !/^\d+\.\d+\.\d+$/.test(security.secretScan?.version ?? "")
       || typeof security.secretScan?.configuration !== "string"

@@ -1,3 +1,5 @@
+import type { ChatAttachmentResponse } from "../chat/index.js";
+
 export type DirectConversationResponse = Readonly<{
   id: string;
   workspaceId: string;
@@ -20,6 +22,7 @@ export type DirectMessageResponse = Readonly<{
   senderId: string;
   text: string;
   createdAt: string;
+  attachments?: readonly ChatAttachmentResponse[];
   sender: Readonly<{
     id: string;
     name: string;

@@ -15,7 +15,9 @@ import {
 } from "../features/direct-messages/index.js";
 import { createHealthRoutes } from "../features/health/index.js";
 import { createWorkspaceRoutes } from "../features/workspaces/index.js";
+import { createMessageSearchRoutes, type MessageSearchService } from "../features/message-search/index.js";
 import type { AuthenticationIntegration } from "../integrations/index.js";
+import type { ChatAttachmentIntegration } from "../integrations/index.js";
 import type { WorkspaceService } from "../features/workspaces/index.js";
 import { createCorsMiddleware, createErrorHandler, createNotFoundHandler } from "../middleware/index.js";
 
@@ -23,11 +25,13 @@ type AppDependencies = Readonly<{
   config: ApiConfig;
   logger: Logger;
   authentication: AuthenticationIntegration;
+  attachmentStorage?: ChatAttachmentIntegration;
   channelService: ChannelService;
   channelMessageService: ChannelMessageService;
   channelRealtime?: ChannelRealtimePublisher;
   directMessageService?: DirectMessageService;
   directMessageRealtime?: DirectMessageRealtimePublisher;
+  messageSearchService?: MessageSearchService;
   workspaceService: WorkspaceService;
 }>;
 
@@ -35,11 +39,13 @@ export const createApp = ({
   config,
   logger,
   authentication,
+  attachmentStorage,
   channelService,
   channelMessageService,
   channelRealtime,
   directMessageService,
   directMessageRealtime,
+  messageSearchService,
   workspaceService
 }: AppDependencies): Express => {
   const app = express();
@@ -75,6 +81,7 @@ export const createApp = ({
     getMemberEmailVisibility: workspaceService.getMemberEmailVisibility,
     service: channelService,
     messageService: channelMessageService,
+    ...(attachmentStorage ? { attachmentStorage } : {}),
     ...(channelRealtime ? { realtime: channelRealtime } : {})
   })];
   if (directMessageService) {
@@ -82,7 +89,15 @@ export const createApp = ({
       getIdentity: authentication.getIdentity,
       getWorkspaceAccess: workspaceService.getAccess,
       service: directMessageService,
+      ...(attachmentStorage ? { attachmentStorage } : {}),
       ...(directMessageRealtime ? { realtime: directMessageRealtime } : {})
+    }));
+  }
+  if (messageSearchService) {
+    featureRouters.push(createMessageSearchRoutes({
+      getIdentity: authentication.getIdentity,
+      getWorkspaceAccess: workspaceService.getAccess,
+      service: messageSearchService
     }));
   }
   for (const featureRouter of featureRouters) app.use(featureRouter);

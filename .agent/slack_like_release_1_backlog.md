@@ -1452,6 +1452,12 @@ stable, and never bypass the underlying access policy.
 **User story:** As a conversation participant, I want to load recent and
 older messages so that I can review previous discussions.
 
+**Status: IN PROGRESS (2026-10-21).** Channel and DM timelines now preserve
+the first visible message position when older pages are prepended. Regression
+tests cover equal-timestamp cursor boundaries. Mongo query indexes, authorization,
+and bounded page limits are already present. Live query-plan/performance and
+browser scroll verification remain.
+
 ### Acceptance criteria
 
 -   AC1: Only authorized conversation participants/members can retrieve
@@ -1508,6 +1514,16 @@ plan/performance at representative data volumes.
 **User story:** As a user, I want to search message content across
 conversations I can access so that I can find decisions, answers, and
 shared information.
+
+**Status: IN PROGRESS (2026-10-21).** Added authenticated workspace-wide search
+over channel memberships and participating DMs using bounded native Mongo text
+queries. Results are relevance/recency ordered, paginated, content-safe, and
+covered by service, authorization-route, storage-scope, and web response tests.
+The workspace search dialog now includes message results and load-more/retry
+states. Search text is sent in a POST body to avoid access-log query leakage.
+Remaining: direct jump/focus/highlight for older results, live Mongo text-index
+verification and representative performance testing, and rollout of the two
+search indexes to the configured database.
 
 ### Acceptance criteria
 

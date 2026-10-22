@@ -1,5 +1,6 @@
 import { encodeChannelMessageCursor, type ChannelMessage, type ChannelMessagePageQuery } from "../domain/index.js";
 import type { ChannelMessageDocument } from "../models/index.js";
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 
 export type ChannelMessageStorageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageDocument[] }>
@@ -19,6 +20,13 @@ export type ChannelMessageStorage = Readonly<{
     userId: string,
     message: ChannelMessageDocument
   ) => Promise<"created" | "channel-unavailable">;
+  findAttachmentForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    attachmentId: string
+  ) => Promise<ChatAttachmentRecord | null>;
 }>;
 
 export type ChannelMessageRepository = Readonly<{
@@ -35,6 +43,7 @@ export type ChannelMessageRepository = Readonly<{
     userId: string,
     message: ChannelMessage
   ) => Promise<"created" | "channel-unavailable">;
+  findAttachmentForMember?: ChannelMessageStorage["findAttachmentForMember"];
 }>;
 
 const toChannelMessage = (document: ChannelMessageDocument): ChannelMessage => Object.freeze({
@@ -42,7 +51,10 @@ const toChannelMessage = (document: ChannelMessageDocument): ChannelMessage => O
   channelId: document.channelId,
   senderId: document.senderId,
   text: document.text,
-  createdAt: document.createdAt
+  createdAt: document.createdAt,
+  ...(document.attachments && document.attachments.length > 0
+    ? { attachments: document.attachments }
+    : {})
 });
 
 const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => Object.freeze({
@@ -50,7 +62,10 @@ const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => O
   channelId: message.channelId,
   senderId: message.senderId,
   text: message.text,
-  createdAt: message.createdAt
+  createdAt: message.createdAt,
+  ...(message.attachments && message.attachments.length > 0
+    ? { attachments: message.attachments }
+    : {})
 });
 
 export const createChannelMessageRepository = (storage: ChannelMessageStorage): ChannelMessageRepository => Object.freeze({
@@ -71,5 +86,8 @@ export const createChannelMessageRepository = (storage: ChannelMessageStorage): 
     });
   },
   createForMember: (workspaceId, channelId, userId, message) =>
-    storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message))
+    storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message)),
+  ...(storage.findAttachmentForMember
+    ? { findAttachmentForMember: storage.findAttachmentForMember }
+    : {})
 });

@@ -46,18 +46,26 @@ void test("the unique index scopes canonical active names by workspace and permi
   });
 });
 
-void test("channel messages require bounded text, author, channel, and timestamp with stable chronology indexing", () => {
+void test("channel messages allow bounded text or attachments and preserve chronology indexing", () => {
   assert.deepEqual(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.required, [
     "_id", "channelId", "senderId", "text", "createdAt"
   ]);
   assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.additionalProperties, false);
   assert.deepEqual(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.properties.text, {
     bsonType: "string",
-    minLength: 1,
+    minLength: 0,
     maxLength: 4000
   });
-  assert.deepEqual(CHANNEL_MESSAGES_INDEXES, [{
-    keys: { channelId: 1, createdAt: -1, _id: -1 },
-    options: { name: "channel_messages_chronological", unique: false }
-  }]);
+  assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.properties.attachments.maxItems, 5);
+  assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.anyOf[1]?.required[0], "attachments");
+  assert.deepEqual(CHANNEL_MESSAGES_INDEXES, [
+    {
+      keys: { channelId: 1, createdAt: -1, _id: -1 },
+      options: { name: "channel_messages_chronological", unique: false }
+    },
+    {
+      keys: { text: "text" },
+      options: { name: "channel_messages_text", unique: false }
+    }
+  ]);
 });

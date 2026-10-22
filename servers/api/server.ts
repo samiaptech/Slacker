@@ -6,11 +6,13 @@ import { createApiConfig, readApiEnvironment } from "./config/index.js";
 import { apiRuntime } from "./constants/index.js";
 import {
   createAuthenticationIntegration,
+  createCloudinaryIntegration,
   createMongoDbIntegration,
   createSocketIoIntegration
 } from "./integrations/index.js";
 import { createMongoWorkspaceStorage, createWorkspaceRepository, createWorkspaceService } from "./features/workspaces/index.js";
 import {
+  createMongoChannelMembershipCleanup,
   createChannelMessageRepository,
   createChannelMessageService,
   createChannelRealtime,
@@ -25,6 +27,11 @@ import {
   createDirectMessageService,
   createMongoDirectMessageStorage
 } from "./features/direct-messages/index.js";
+import {
+  createMessageSearchRepository,
+  createMessageSearchService,
+  createMongoMessageSearchStorage
+} from "./features/message-search/index.js";
 
 const config = createApiConfig(readApiEnvironment());
 const logger = createLogger({
@@ -41,15 +48,21 @@ const authentication = createAuthenticationIntegration({
   config,
   database: database.getDatabase()
 });
+const attachmentStorage = config.cloudinary
+  ? createCloudinaryIntegration(config.cloudinary)
+  : undefined;
+const mongoDatabase = database.getDatabase();
+const cleanupChannelMemberships = createMongoChannelMembershipCleanup(mongoDatabase);
 const workspaceRepository = createWorkspaceRepository(
-  createMongoWorkspaceStorage(database.getDatabase(), database.withTransaction)
+  createMongoWorkspaceStorage(mongoDatabase, database.withTransaction, cleanupChannelMemberships)
 );
-const channelRepository = createChannelRepository(createMongoChannelStorage(database.getDatabase(), database.withTransaction));
+const channelRepository = createChannelRepository(createMongoChannelStorage(mongoDatabase, database.withTransaction));
 const channelMessageRepository = createChannelMessageRepository(
   createMongoChannelMessageStorage(database.getDatabase(), database.withTransaction)
 );
 const channelMessageService = createChannelMessageService({
   repository: channelMessageRepository,
+  ...(attachmentStorage ? { attachmentStorage } : {}),
   createId: randomUUID,
   now: () => new Date(),
   findUsersByIds: authentication.findUsersByIds
@@ -59,6 +72,7 @@ const directMessageRepository = createDirectMessageRepository(
 );
 const directMessageService = createDirectMessageService({
   repository: directMessageRepository,
+  ...(attachmentStorage ? { attachmentStorage } : {}),
   isWorkspaceMember: async (workspaceId, userId) => {
     try {
       return await workspaceRepository.findMembership(workspaceId, userId) ? "member" : "not-member";
@@ -70,6 +84,12 @@ const directMessageService = createDirectMessageService({
   },
   createId: randomUUID,
   now: () => new Date(),
+  findUsersByIds: authentication.findUsersByIds
+});
+const messageSearchService = createMessageSearchService({
+  repository: createMessageSearchRepository(
+    createMongoMessageSearchStorage(database.getDatabase())
+  ),
   findUsersByIds: authentication.findUsersByIds
 });
 const channelService = createChannelService({
@@ -126,11 +146,13 @@ const app = createApp({
   config,
   logger,
   authentication,
+  ...(attachmentStorage ? { attachmentStorage } : {}),
   channelService,
   channelMessageService,
   channelRealtime,
   directMessageService,
   directMessageRealtime,
+  messageSearchService,
   workspaceService
 });
 const server = createServer({ app, config, logger });

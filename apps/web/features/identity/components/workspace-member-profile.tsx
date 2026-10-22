@@ -1,30 +1,20 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@workspace/ui";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@workspace/ui";
+import { Skeleton } from "@workspace/ui/primitives";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import {
   workspaceMemberProfileSchema,
   workspaceMemberRoleSchema,
   type WorkspaceMemberProfileView
 } from "../types";
+import { WorkspaceMemberManagement } from "./workspace-member-management";
+import { WorkspaceMemberProfileCard } from "./workspace-member-profile-card";
 
 type WorkspaceMemberProfileProps = Readonly<{
   apiBaseUrl: string;
@@ -39,6 +29,7 @@ export const WorkspaceMemberProfile = ({ apiBaseUrl, userId }: WorkspaceMemberPr
   const { activeWorkspace, currentUser } = useWorkspaceContext();
   const router = useRouter();
   const [profileState, setProfileState] = useState<MemberProfileState | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const profileKey = `${activeWorkspace.id}\u0000${userId}`;
   const currentProfileState = profileState?.key === profileKey ? profileState : null;
   const member = currentProfileState?.status === "found" ? currentProfileState.member : null;
@@ -83,7 +74,7 @@ export const WorkspaceMemberProfile = ({ apiBaseUrl, userId }: WorkspaceMemberPr
     };
     void loadProfile();
     return () => controller.abort();
-  }, [activeWorkspace.id, apiBaseUrl, profileKey, userId]);
+  }, [activeWorkspace.id, apiBaseUrl, profileKey, reloadToken, userId]);
 
   const changeMemberRole = async (role: "admin" | "member"): Promise<void> => {
     if (!member || isSavingRole || member.role === role) return;
@@ -155,125 +146,43 @@ export const WorkspaceMemberProfile = ({ apiBaseUrl, userId }: WorkspaceMemberPr
   };
 
   return (
-    <main aria-labelledby="member-profile-title" className="mx-auto w-full max-w-2xl space-y-6 py-8">
-      <header>
-        <p className="text-sm font-medium text-primary">{activeWorkspace.name}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground" id="member-profile-title">
-          Member profile
-        </h1>
-      </header>
-      {isLoading ? <p className="text-sm text-muted-foreground" role="status">Loading profile…</p> : null}
-      {errorMessage ? (
-        <section className="space-y-3 rounded-lg border border-border bg-card p-6">
-          <p className="text-sm text-destructive" role="alert">{errorMessage}</p>
-          <Button onClick={() => window.location.reload()} type="button" variant="outline">Retry</Button>
-        </section>
-      ) : null}
-      {member ? (
-        <section aria-label={`${member.name ?? "Member"} profile`} className="space-y-5 rounded-lg border border-border bg-card p-6">
-          <div className="flex items-center gap-4">
-            {member.image ? (
-              <Image alt="" className="size-16 rounded-full object-cover" height={64} src={member.image} unoptimized width={64} />
-            ) : (
-              <div aria-hidden="true" className="flex size-16 items-center justify-center rounded-full bg-muted text-xl font-semibold text-muted-foreground">
-                {(member.name ?? member.email ?? "?").slice(0, 1).toUpperCase()}
-              </div>
-            )}
-            <div className="min-w-0">
-              <h2 className="truncate text-xl font-semibold text-foreground">{member.name ?? "Workspace member"}</h2>
-              <p className="text-sm text-muted-foreground">
-                {member.role === "admin" ? "Workspace admin" : "Member"}
-              </p>
-            </div>
-          </div>
-          {member.title ? (
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground">Role or title</h3>
-              <p className="mt-1 text-foreground">{member.title}</p>
-            </div>
-          ) : null}
-          {member.email ? (
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground">Email</h3>
-              <p className="mt-1 break-all text-foreground">{member.email}</p>
-            </div>
-          ) : null}
-          {member.id === currentUser.id ? (
-            <Link className="text-sm text-primary underline-offset-4 hover:underline" href={"/profile" as Route}>
-              Edit your profile
-            </Link>
-          ) : null}
-        </section>
-      ) : null}
-      {member && activeWorkspace.role === "admin" && member.id !== currentUser.id ? (
-        <section aria-labelledby="member-management-title" className="space-y-4 rounded-lg border border-border bg-card p-6">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground" id="member-management-title">Manage workspace member</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Change {member.name ?? "this member"}’s workspace role or remove them from {activeWorkspace.name}.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Select
-              disabled={isSavingRole || isRemovingMember}
-              onValueChange={(value) => {
-                if (value === "admin" || value === "member") void changeMemberRole(value);
-              }}
-              value={member.role}
-            >
-              <SelectTrigger aria-label="Workspace role" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="member">Member</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              disabled={isSavingRole || isRemovingMember}
-              onClick={() => { setManagementMessage(null); setIsRemoveDialogOpen(true); }}
-              type="button"
-              variant="destructive"
-            >
-              Remove from workspace
-            </Button>
-          </div>
-          {isSavingRole ? <p className="text-sm text-muted-foreground" role="status">Updating role…</p> : null}
-          {managementMessage ? <p className="text-sm text-muted-foreground" role="status">{managementMessage}</p> : null}
-        </section>
-      ) : null}
-      <Link className="text-sm text-primary underline-offset-4 hover:underline" href={"/" as Route}>
-        Back to workspace
+    <main aria-labelledby="member-profile-title" className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6 sm:px-7 sm:py-9">
+      <Link className="inline-flex items-center gap-2 rounded-lg text-sm font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="/">
+        <ArrowLeft aria-hidden="true" className="size-4" /> Back to workspace
       </Link>
-      <Dialog
-        onOpenChange={(open) => {
-          if (!isRemovingMember) setIsRemoveDialogOpen(open);
-        }}
-        open={isRemoveDialogOpen}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove {member?.name ?? "this member"}?</DialogTitle>
-            <DialogDescription>
-              They will lose access to {activeWorkspace.name} and all its channels. You can invite them again later.
-            </DialogDescription>
-          </DialogHeader>
-          {managementMessage ? <p className="text-sm text-destructive" role="alert">{managementMessage}</p> : null}
-          <DialogFooter>
-            <Button
-              disabled={isRemovingMember}
-              onClick={() => setIsRemoveDialogOpen(false)}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button disabled={isRemovingMember} onClick={() => void removeMember()} type="button" variant="destructive">
-              {isRemovingMember ? "Removing…" : "Remove member"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">{activeWorkspace.name}</p>
+        <p className="text-sm text-muted-foreground">Get to know someone in your workspace.</p>
+      </div>
+      {isLoading ? (
+        <section aria-label="Loading member profile" className="overflow-hidden rounded-3xl border border-border bg-card" role="status">
+          <div className="flex flex-col gap-4 bg-[#173b3a] p-6 sm:flex-row sm:items-center sm:p-9">
+            <Skeleton className="size-24 shrink-0 rounded-[1.75rem]" />
+            <div className="w-full space-y-3"><Skeleton className="h-3 w-32" /><Skeleton className="h-8 w-56" /><Skeleton className="h-4 w-40" /></div>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2 sm:p-7"><Skeleton className="h-20 rounded-2xl" /><Skeleton className="h-20 rounded-2xl" /></div>
+        </section>
+      ) : null}
+      {errorMessage ? (
+        <section className="space-y-4 rounded-3xl border border-[#e3e9e3] bg-white p-6 sm:p-8">
+          <div><h1 className="font-semibold text-foreground" id="member-profile-title">Profile unavailable</h1><p className="mt-2 text-sm text-destructive" role="alert">{errorMessage}</p></div>
+          <Button onClick={() => setReloadToken((current) => current + 1)} type="button" variant="outline">Try again</Button>
+        </section>
+      ) : null}
+      {member ? <WorkspaceMemberProfileCard isCurrentUser={member.id === currentUser.id} member={member} /> : null}
+      {member && activeWorkspace.role === "admin" && member.id !== currentUser.id ? (
+        <WorkspaceMemberManagement
+          isRemoveDialogOpen={isRemoveDialogOpen}
+          isRemovingMember={isRemovingMember}
+          isSavingRole={isSavingRole}
+          managementMessage={managementMessage}
+          member={member}
+          onRemove={() => void removeMember()}
+          onRemoveDialogChange={(open) => { setManagementMessage(null); setIsRemoveDialogOpen(open); }}
+          onRoleChange={(role) => void changeMemberRole(role)}
+          workspaceName={activeWorkspace.name}
+        />
+      ) : null}
     </main>
   );
 };

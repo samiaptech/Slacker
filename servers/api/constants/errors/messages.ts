@@ -13,5 +13,8 @@ export const ERROR_MESSAGES = Object.freeze({
   channelMembershipConflict: "This membership change is not allowed.",
   channelUnavailable: "The channel is unavailable or you do not have access.",
   directMessageUnavailable: "The direct conversation is unavailable or you do not have access.",
-  directMessageStorageUnavailable: "Direct message storage is temporarily unavailable."
+  directMessageStorageUnavailable: "Direct message storage is temporarily unavailable.",
+  chatAttachmentStorageUnavailable: "Chat attachment storage is temporarily unavailable.",
+  messageSearchUnavailable: "Message search is temporarily unavailable.",
+  rateLimited: "Search request limit reached. Wait before searching again."
 } as const);

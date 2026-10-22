@@ -8,6 +8,9 @@ export type WorkspaceContextValue = Readonly<{
   workspaces: readonly WorkspaceMembershipSummary[];
   currentUser: WorkspaceAccessResponse["user"];
   selectWorkspace: (workspaceId: string) => void;
+  leaveWorkspace: () => Promise<void>;
+  startCreatingWorkspace: () => void;
+  signOut: () => Promise<void>;
   setCurrentUserProfile: (profile: Readonly<{ name: string; title: string | null }>) => void;
 }>;
 

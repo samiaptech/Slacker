@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
 import type { RequestHandler } from "express";
 import type {
+  ChatAttachmentResponse,
   DirectConversationListResponse,
   DirectConversationResponse,
   DirectMessageListResponse,
@@ -9,6 +10,8 @@ import type {
 import { z } from "zod";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
 import { createApplicationError } from "../../../errors/index.js";
+import type { ChatAttachmentIntegration } from "../../../integrations/index.js";
+import { validateChatAttachment } from "../../../integrations/cloudinary/index.js";
 import {
   decodeDirectMessageCursor,
   DIRECT_CONVERSATION_LIST_LIMIT,
@@ -35,18 +38,23 @@ type ControllerDependencies = Readonly<{
     workspaceId: string | null
   ) => Promise<DirectWorkspaceAccessResult>;
   service: DirectMessageService;
+  attachmentStorage?: ChatAttachmentIntegration;
   realtime?: DirectMessageRealtime;
 }>;
 
 type RequestAccessResult =
-  | Readonly<{ kind: "allowed"; workspaceId: string; userId: string }>
+  | Readonly<{
+    kind: "allowed";
+    workspaceId: string;
+    userId: string;
+    senderProfile: Readonly<{ name: string; image: string | null }>;
+  }>
   | Readonly<{ kind: "unauthenticated" | "denied" | "unavailable" }>;
 
 const openBodySchema = z.object({ recipientId: z.string().trim().min(1).max(128) }).strict();
 const messageBodySchema = z.object({
-  text: z.string()
+  text: z.string().default("")
     .refine((text) => Array.from(text).length <= DIRECT_MESSAGE_MAX_LENGTH)
-    .refine((text) => text.trim().length > 0)
 }).strict();
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(DIRECT_MESSAGE_PAGE_SIZE_MAX)
@@ -71,7 +79,8 @@ const resolveAccess = async (
   return Object.freeze({
     kind: "allowed",
     workspaceId: result.access.workspace.id,
-    userId: identity.id
+    userId: identity.id,
+    senderProfile: Object.freeze({ name: identity.name, image: identity.image })
   });
 };
 
@@ -83,14 +92,24 @@ const toConversationResponse = (conversation: DirectConversationWithParticipant)
   lastActivityAt: conversation.lastActivityAt.toISOString()
 });
 
-const toMessageResponse = (message: DirectMessageWithSender): DirectMessageResponse => ({
-  id: message.id,
-  conversationId: message.conversationId,
-  senderId: message.senderId,
-  text: message.text,
-  createdAt: message.createdAt.toISOString(),
-  sender: message.sender
-});
+const toMessageResponse = (message: DirectMessageWithSender): DirectMessageResponse => {
+  const attachments = message.attachments ?? [];
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    text: message.text,
+    createdAt: message.createdAt.toISOString(),
+    ...(attachments.length > 0 ? { attachments: attachments.map((attachment): ChatAttachmentResponse => ({
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    downloadUrl: `/direct-messages/${encodeURIComponent(message.conversationId)}/messages/${encodeURIComponent(message.id)}/attachments/${encodeURIComponent(attachment.id)}`
+    })) } : {}),
+    sender: message.sender
+  };
+};
 
 const sendAccessError = (kind: RequestAccessResult["kind"], next: Parameters<RequestHandler>[2]): void => {
   if (kind === "unauthenticated") {
@@ -308,6 +327,11 @@ export const createSendDirectMessageController = (
       sendNotFound(next);
       return;
     }
+    const files = Array.isArray(request.files) ? request.files.map((file) => ({
+      buffer: file.buffer,
+      name: file.originalname,
+      size: file.size
+    })) : [];
     const parsed = messageBodySchema.safeParse(request.body);
     if (!parsed.success) {
       const requestedText = isRecord(request.body) && typeof request.body.text === "string"
@@ -326,7 +350,43 @@ export const createSendDirectMessageController = (
       }));
       return;
     }
-    const result = await service.send(access.workspaceId, conversationId, access.userId, parsed.data.text);
+    if (files.length === 0 && parsed.data.text.trim().length === 0) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "text", reason: "message_required" }
+      }));
+      return;
+    }
+    for (const file of files) {
+      const validation = validateChatAttachment(file);
+      if (!validation.ok) {
+        next(createApplicationError({
+          code: ERROR_CODES.validation,
+          message: ERROR_MESSAGES.validation,
+          status: HTTP_STATUS.badRequest,
+          details: { field: "files", reason: validation.reason }
+        }));
+        return;
+      }
+    }
+    const result = await service.send(
+      access.workspaceId,
+      conversationId,
+      access.userId,
+      parsed.data.text,
+      files,
+      access.senderProfile
+    );
+    if (result.kind === "attachment-unavailable") {
+      next(createApplicationError({
+        code: ERROR_CODES.chatAttachmentStorageUnavailable,
+        message: ERROR_MESSAGES.chatAttachmentStorageUnavailable,
+        status: HTTP_STATUS.serviceUnavailable
+      }));
+      return;
+    }
     if (result.kind === "unavailable") {
       sendUnavailable(next);
       return;
@@ -340,13 +400,98 @@ export const createSendDirectMessageController = (
         code: ERROR_CODES.validation,
         message: ERROR_MESSAGES.validation,
         status: HTTP_STATUS.badRequest,
-        details: { field: "text", reason: result.error }
+        details: {
+          field: ["attachment_limit_exceeded", "unsupported_file_type", "invalid_file_content", "file_too_large"]
+            .includes(result.error) ? "files" : "text",
+          reason: result.error
+        }
       }));
       return;
     }
     const message = toMessageResponse(result.message);
     realtime?.publishDirectMessage(access.workspaceId, conversationId, message);
     response.status(HTTP_STATUS.created).json(message);
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createAuthorizeDirectMessageUploadController = (
+  { getIdentity, getWorkspaceAccess, service }: ControllerDependencies
+): RequestHandler => async (request, _response, next): Promise<void> => {
+  if (!request.is("multipart/form-data")) {
+    next();
+    return;
+  }
+  try {
+    const access = await resolveAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendAccessError(access.kind, next);
+      return;
+    }
+    const conversationId = request.params.conversationId;
+    if (typeof conversationId !== "string" || conversationId.length === 0) {
+      sendNotFound(next);
+      return;
+    }
+    const result = await service.get(access.workspaceId, conversationId, access.userId);
+    if (result.kind === "unavailable") {
+      sendUnavailable(next);
+      return;
+    }
+    if (result.kind !== "found") {
+      sendNotFound(next);
+      return;
+    }
+    next();
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createDownloadDirectMessageAttachmentController = (
+  { getIdentity, getWorkspaceAccess, service, attachmentStorage }: ControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "private, no-store");
+  try {
+    const access = await resolveAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendAccessError(access.kind, next);
+      return;
+    }
+    const { conversationId, messageId, attachmentId } = request.params;
+    if (typeof conversationId !== "string" || typeof messageId !== "string" || typeof attachmentId !== "string") {
+      sendNotFound(next);
+      return;
+    }
+    const result = await service.getAttachment(
+      access.workspaceId,
+      conversationId,
+      access.userId,
+      messageId,
+      attachmentId
+    );
+    if (result.kind === "unavailable") {
+      sendUnavailable(next);
+      return;
+    }
+    if (result.kind === "not-found") {
+      sendNotFound(next);
+      return;
+    }
+    if (!attachmentStorage) {
+      next(createApplicationError({
+        code: ERROR_CODES.chatAttachmentStorageUnavailable,
+        message: ERROR_MESSAGES.chatAttachmentStorageUnavailable,
+        status: HTTP_STATUS.serviceUnavailable
+      }));
+      return;
+    }
+    const buffer = await attachmentStorage.download(result.attachment);
+    response.setHeader("Content-Type", result.attachment.mimeType);
+    response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(result.attachment.name)}`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.status(HTTP_STATUS.ok).send(buffer);
   } catch (error: unknown) {
     next(error);
   }

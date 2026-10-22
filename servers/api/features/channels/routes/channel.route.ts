@@ -1,5 +1,10 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
+import multer from "multer";
+import { createApplicationError } from "../../../errors/index.js";
+import type { ChatAttachmentIntegration } from "../../../integrations/index.js";
+import { CHAT_ATTACHMENT_MAX_BYTES, CHAT_ATTACHMENT_MAX_FILES } from "../../../integrations/cloudinary/index.js";
+import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
 import {
   createChannelController,
   createGetChannelController,
@@ -10,7 +15,9 @@ import {
   createRemoveChannelMemberController,
   createListChannelsController,
   createListChannelMessagesController,
+  createAuthorizeChannelMessageUploadController,
   createSendChannelMessageController,
+  createDownloadChannelAttachmentController,
   type ChannelWorkspaceAccessResult,
   type ChannelMemberEmailVisibilityResult,
   type ChannelWorkspaceIdentity
@@ -28,8 +35,36 @@ export type ChannelRouteDependencies = Readonly<{
   ) => Promise<ChannelMemberEmailVisibilityResult>;
   service: ChannelService;
   messageService: ChannelMessageService;
+  attachmentStorage?: ChatAttachmentIntegration;
   realtime?: ChannelRealtimePublisher;
 }>;
+
+const uploadParser = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: CHAT_ATTACHMENT_MAX_BYTES, files: CHAT_ATTACHMENT_MAX_FILES, fields: 1, fieldSize: 16_384, parts: CHAT_ATTACHMENT_MAX_FILES + 1 }
+}).array("files", CHAT_ATTACHMENT_MAX_FILES);
+
+const parseMessageAttachments: RequestHandler = (request, response, next) => {
+  uploadParser(request, response, (error: unknown) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error instanceof multer.MulterError) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: error.code === "LIMIT_FILE_SIZE" ? HTTP_STATUS.payloadTooLarge : HTTP_STATUS.badRequest,
+        details: {
+          field: "files",
+          reason: error.code === "LIMIT_FILE_SIZE" ? "file_too_large" : "invalid_file_count_or_field"
+        }
+      }));
+      return;
+    }
+    next(error);
+  });
+};
 
 export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Router => {
   const router = Router();
@@ -54,12 +89,28 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     service: dependencies.messageService
   }));
-  router.post("/channels/:channelId/messages", createSendChannelMessageController({
+  const messageDependencies = {
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     service: dependencies.messageService,
+    ...(dependencies.attachmentStorage ? { attachmentStorage: dependencies.attachmentStorage } : {}),
     ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
-  }));
+  };
+  router.post(
+    "/channels/:channelId/messages",
+    createAuthorizeChannelMessageUploadController(messageDependencies),
+    parseMessageAttachments,
+    createSendChannelMessageController(messageDependencies)
+  );
+  router.get(
+    "/channels/:channelId/messages/:messageId/attachments/:attachmentId",
+    createDownloadChannelAttachmentController({
+      getIdentity: dependencies.getIdentity,
+      getWorkspaceAccess: dependencies.getWorkspaceAccess,
+      service: dependencies.messageService,
+      ...(dependencies.attachmentStorage ? { attachmentStorage: dependencies.attachmentStorage } : {})
+    })
+  );
   router.post("/channels/:channelId/memberships", createJoinChannelController({
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,

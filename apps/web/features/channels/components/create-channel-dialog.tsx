@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ReactElement } from "react";
+import { useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import {
@@ -24,9 +24,9 @@ import {
 import { submitChannelCreation, type CreateChannelFormErrors } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 
-type CreateChannelDialogProps = Readonly<{ apiBaseUrl: string }>;
+type CreateChannelDialogProps = Readonly<{ apiBaseUrl: string; trigger?: ReactNode }>;
 
-export const ChannelCreateDialog = ({ apiBaseUrl }: CreateChannelDialogProps): ReactElement => {
+export const ChannelCreateDialog = ({ apiBaseUrl, trigger }: CreateChannelDialogProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
   const router = useRouter();
   const idempotencyKey = useRef<string | null>(null);
@@ -90,7 +90,7 @@ export const ChannelCreateDialog = ({ apiBaseUrl }: CreateChannelDialogProps): R
   return (
     <Dialog onOpenChange={(open) => { if (!isSubmitting) setIsOpen(open); }} open={isOpen}>
       <DialogTrigger asChild>
-        <Button className="mt-4" type="button">Create channel</Button>
+        {trigger ?? <Button className="mt-4" type="button">Create channel</Button>}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

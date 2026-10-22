@@ -1,5 +1,6 @@
 import { encodeDirectMessageCursor, type DirectConversation, type DirectMessage, type DirectMessagePageQuery } from "../domain/index.js";
 import type { DirectConversationDocument, DirectMessageDocument } from "../models/index.js";
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 
 export type DirectMessageOpenStorageResult =
   Readonly<{ kind: "opened"; conversation: DirectConversationDocument; created: boolean }>;
@@ -31,6 +32,13 @@ export type DirectMessageStorage = Readonly<{
     userId: string,
     message: DirectMessageDocument
   ) => Promise<boolean>;
+  findAttachmentForMember?: (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    attachmentId: string
+  ) => Promise<ChatAttachmentRecord | null>;
 }>;
 
 export type DirectMessageRepository = ReturnType<typeof createDirectMessageRepository>;
@@ -50,7 +58,10 @@ const toMessage = (document: DirectMessageDocument): DirectMessage => Object.fre
   conversationId: document.conversationId,
   senderId: document.senderId,
   text: document.text,
-  createdAt: document.createdAt
+  createdAt: document.createdAt,
+  ...(document.attachments && document.attachments.length > 0
+    ? { attachments: document.attachments }
+    : {})
 });
 
 const toConversationDocument = (conversation: DirectConversation): DirectConversationDocument => Object.freeze({
@@ -68,7 +79,10 @@ const toMessageDocument = (message: DirectMessage): DirectMessageDocument => Obj
   conversationId: message.conversationId,
   senderId: message.senderId,
   text: message.text,
-  createdAt: message.createdAt
+  createdAt: message.createdAt,
+  ...(message.attachments && message.attachments.length > 0
+    ? { attachments: message.attachments }
+    : {})
 });
 
 export const createDirectMessageRepository = (storage: DirectMessageStorage) => Object.freeze({
@@ -116,5 +130,8 @@ export const createDirectMessageRepository = (storage: DirectMessageStorage) => 
     conversationId,
     userId,
     toMessageDocument(message)
-  )
+  ),
+  ...(storage.findAttachmentForMember
+    ? { findAttachmentForMember: storage.findAttachmentForMember }
+    : {})
 });

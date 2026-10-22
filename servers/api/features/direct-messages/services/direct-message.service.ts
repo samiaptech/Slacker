@@ -1,4 +1,5 @@
 import {
+  DIRECT_MESSAGE_MAX_LENGTH,
   createDirectMessagePairKey,
   validateDirectMessageText,
   type DirectConversation,
@@ -6,6 +7,12 @@ import {
   type DirectMessagePageQuery
 } from "../domain/index.js";
 import type { DirectMessageRepository } from "../repositories/index.js";
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
+import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
+import {
+  CHAT_ATTACHMENT_MAX_FILES,
+  isChatAttachmentValidationError
+} from "../../../integrations/cloudinary/index.js";
 
 export type DirectParticipant = Readonly<{ id: string; name: string; image: string | null }>;
 export type DirectConversationWithParticipant = DirectConversation & Readonly<{ otherParticipant: DirectParticipant }>;
@@ -15,6 +22,7 @@ export type DirectMessageService = ReturnType<typeof createDirectMessageService>
 
 type DirectMessageServiceDependencies = Readonly<{
   repository: DirectMessageRepository;
+  attachmentStorage?: ChatAttachmentIntegration;
   isWorkspaceMember: (
     workspaceId: string,
     userId: string
@@ -50,6 +58,7 @@ const withParticipant = async (
 
 export const createDirectMessageService = ({
   repository,
+  attachmentStorage,
   isWorkspaceMember,
   createId,
   now,
@@ -152,22 +161,63 @@ export const createDirectMessageService = ({
       throw error;
     }
   },
-  send: async (workspaceId: string, conversationId: string, userId: string, text: string) => {
-    const validated = validateDirectMessageText(text);
+  send: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    text: string,
+    files: readonly ChatAttachmentUpload[] = [],
+    senderProfile?: Omit<DirectParticipant, "id">
+  ) => {
+    if (files.length > CHAT_ATTACHMENT_MAX_FILES) {
+      return Object.freeze({ kind: "invalid" as const, error: "attachment_limit_exceeded" as const });
+    }
+    const validated = files.length > 0
+      ? (Array.from(text).length > DIRECT_MESSAGE_MAX_LENGTH
+        ? Object.freeze({ ok: false as const, error: "message_too_long" as const })
+        : Object.freeze({ ok: true as const, text }))
+      : validateDirectMessageText(text);
     if (!validated.ok) return Object.freeze({ kind: "invalid" as const, error: validated.error });
-    const message: DirectMessage = Object.freeze({
-      id: createId(),
-      workspaceId,
-      conversationId,
-      senderId: userId,
-      text: validated.text,
-      createdAt: now()
-    });
+    const storage = attachmentStorage;
+    const uploaded: ChatAttachmentRecord[] = [];
+    const removeUploaded = async (): Promise<void> => {
+      if (!storage || uploaded.length === 0) return;
+      const results = await Promise.allSettled(uploaded.map((attachment) => storage.delete(attachment)));
+      const failures: Error[] = [];
+      for (const result of results) {
+        if (result.status === "rejected") {
+          failures.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+        }
+      }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "One or more uploaded direct-message attachments could not be removed.");
+      }
+    };
+    let persisted = false;
     try {
+      if (files.length > 0) {
+        if (!storage) return Object.freeze({ kind: "attachment-unavailable" as const });
+        const conversation = await repository.findForMember(workspaceId, conversationId, userId);
+        if (!conversation) return Object.freeze({ kind: "not-found" as const });
+        for (const file of files) uploaded.push(await storage.upload(file));
+      }
+      const message: DirectMessage = Object.freeze({
+        id: createId(),
+        workspaceId,
+        conversationId,
+        senderId: userId,
+        text: files.length > 0 && validated.text.trim().length === 0 ? "" : validated.text,
+        createdAt: now(),
+        ...(uploaded.length > 0 ? { attachments: Object.freeze([...uploaded]) } : {})
+      });
       const created = await repository.createMessageForMember(workspaceId, conversationId, userId, message);
-      if (!created) return Object.freeze({ kind: "not-found" as const });
-      const profiles = await findUsersByIds([userId]);
-      const profile = profiles.find(({ id }) => id === userId);
+      if (!created) {
+        await removeUploaded();
+        return Object.freeze({ kind: "not-found" as const });
+      }
+      persisted = true;
+      const profile = senderProfile ?? (await findUsersByIds([userId]))
+        .find(({ id }) => id === userId);
       return Object.freeze({
         kind: "sent" as const,
         message: Object.freeze({
@@ -180,7 +230,38 @@ export const createDirectMessageService = ({
         })
       });
     } catch (error: unknown) {
+      if (!persisted) await removeUploaded();
       if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });
+      if (isChatAttachmentValidationError(error)) {
+        return Object.freeze({ kind: "invalid" as const, error: error.reason });
+      }
+      throw error;
+    }
+  },
+  getAttachment: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    attachmentId: string
+  ): Promise<
+    | Readonly<{ kind: "found"; attachment: ChatAttachmentRecord }>
+    | Readonly<{ kind: "not-found" }>
+    | Readonly<{ kind: "unavailable" }>
+  > => {
+    try {
+      const attachment = await repository.findAttachmentForMember?.(
+        workspaceId,
+        conversationId,
+        userId,
+        messageId,
+        attachmentId
+      ) ?? null;
+      return attachment
+        ? Object.freeze({ kind: "found", attachment })
+        : Object.freeze({ kind: "not-found" });
+    } catch (error: unknown) {
+      if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" });
       throw error;
     }
   }

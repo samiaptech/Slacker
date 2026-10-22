@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Logger } from "@workspace/logging";
 import { createApp, createServer } from "../bootstrap/index.js";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../constants/index.js";
+import { summarizeMongoValidationError } from "../middleware/errors.js";
 import type { AuthenticationIntegration } from "../integrations/index.js";
 import type { ApiConfig } from "../types/index.js";
 import type { ChannelMessageService } from "../features/channels/index.js";
@@ -46,7 +47,8 @@ const channelService = {
 };
 const channelMessageService: ChannelMessageService = {
   list: () => Promise.resolve({ kind: "channel-unavailable" }),
-  send: () => Promise.resolve({ kind: "channel-unavailable" })
+  send: () => Promise.resolve({ kind: "channel-unavailable" }),
+  getAttachment: () => Promise.resolve({ kind: "not-found" })
 };
 
 void test("unknown routes use the API error boundary", async (context) => {
@@ -123,4 +125,48 @@ void test("does not log workspace invitation tokens or OAuth callback codes", as
   const logOutput = logEntries.join("\n");
   assert.equal(logOutput.includes(inviteToken), false);
   assert.equal(logOutput.includes(callbackCode), false);
+});
+
+void test("summarizes MongoDB validation failures without logging document values", () => {
+  const diagnostics = summarizeMongoValidationError({
+    code: 121,
+    codeName: "DocumentValidationFailure",
+    errInfo: {
+      details: {
+        schemaRulesNotSatisfied: [{
+          operatorName: "properties",
+          propertiesNotSatisfied: [{
+            propertyName: "attachments",
+            details: [{
+              operatorName: "items",
+              itemsNotSatisfied: [{
+                itemIndex: 0,
+                details: [{
+                  operatorName: "properties",
+                  propertiesNotSatisfied: [{
+                    propertyName: "size",
+                    details: [{
+                      operatorName: "bsonType",
+                      consideredValue: "private-document-name"
+                    }]
+                  }]
+                }]
+              }]
+            }]
+          }]
+        }]
+      }
+    }
+  });
+
+  assert.deepEqual(diagnostics, {
+    code: 121,
+    codeName: "DocumentValidationFailure",
+    validationRules: [
+      "attachments:items",
+      "attachments:properties",
+      "attachments.size:bsonType"
+    ]
+  });
+  assert.equal(JSON.stringify(diagnostics).includes("private-document-name"), false);
 });

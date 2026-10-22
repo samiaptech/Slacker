@@ -1,3 +1,5 @@
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
+
 export const CHANNEL_MESSAGE_MAX_LENGTH = 4_000;
 export const CHANNEL_MESSAGE_PAGE_SIZE_DEFAULT = 50;
 export const CHANNEL_MESSAGE_PAGE_SIZE_MAX = 100;
@@ -8,6 +10,7 @@ export type ChannelMessage = Readonly<{
   senderId: string;
   text: string;
   createdAt: Date;
+  attachments?: readonly ChatAttachmentRecord[];
 }>;
 
 export type ChannelMessageCursor = Readonly<{

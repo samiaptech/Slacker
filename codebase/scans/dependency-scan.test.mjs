@@ -22,6 +22,69 @@ test("normalizes a clean pnpm audit report", async () => {
   assert.deepEqual(scan.issues, []);
 });
 
+test("ignores only configured advisories while reporting all other findings", async () => {
+  const scan = await runDependencyScan({
+    workspaceRoot: process.cwd(),
+    minimumSeverity: "high",
+    ignoredAdvisories: ["GHSA-vfj7-8cjw-p6xm"],
+    commandRunner: async ({ args }) => {
+      assert.deepEqual(args, ["audit", "--json", "--audit-level", "high"]);
+      return {
+        exitCode: 1,
+        stdout: JSON.stringify({
+          advisories: {
+            101: {
+              id: 101,
+              github_advisory_id: "GHSA-vfj7-8cjw-p6xm",
+              module_name: "braces",
+              severity: "high"
+            },
+            102: {
+              id: 102,
+              github_advisory_id: "GHSA-other-other-other",
+              module_name: "another-package",
+              severity: "high"
+            }
+          }
+        }),
+        stderr: "",
+        durationMs: 5
+      };
+    }
+  });
+
+  assert.equal(scan.result.status, "failed");
+  assert.equal(scan.issues.length, 1);
+  assert.match(scan.issues[0].message, /GHSA-other-other-other/);
+});
+
+test("passes when pnpm reports only configured ignored advisories", async () => {
+  const scan = await runDependencyScan({
+    workspaceRoot: process.cwd(),
+    ignoredAdvisories: ["GHSA-vfj7-8cjw-p6xm"],
+    commandRunner: async () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({
+        advisories: {
+          101: {
+            id: 101,
+            github_advisory_id: "GHSA-vfj7-8cjw-p6xm",
+            module_name: "braces",
+            severity: "high"
+          }
+        }
+      }),
+      stderr: "",
+      durationMs: 5
+    })
+  });
+
+  assert.equal(scan.result.status, "passed");
+  assert.equal(scan.result.exitCode, 0);
+  assert.equal(scan.result.findingCount, 0);
+  assert.deepEqual(scan.issues, []);
+});
+
 test("turns pnpm advisories into repository policy failures", async () => {
   const scan = await runDependencyScan({
     workspaceRoot: process.cwd(),

@@ -1,3 +1,4 @@
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { Channel, ChannelMembership } from "../domain/index.js";
 
 export const CHANNELS_COLLECTION = "channels";
@@ -22,6 +23,7 @@ export type ChannelMessageDocument = Readonly<{
   senderId: string;
   text: string;
   createdAt: Date;
+  attachments?: readonly ChatAttachmentRecord[];
 }>;
 
 /** MongoDB collection validation keeps persisted channel documents aligned with the domain contract. */
@@ -95,14 +97,42 @@ export const CHANNEL_CREATION_REQUESTS_COLLECTION_VALIDATOR = Object.freeze({
 export const CHANNEL_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
   $jsonSchema: Object.freeze({
     bsonType: "object",
+    anyOf: Object.freeze([
+      Object.freeze({
+        required: Object.freeze(["text"]),
+        properties: Object.freeze({ text: Object.freeze({ minLength: 1 }) })
+      }),
+      Object.freeze({
+        required: Object.freeze(["attachments"]),
+        properties: Object.freeze({ attachments: Object.freeze({ minItems: 1 }) })
+      })
+    ]),
     required: ["_id", "channelId", "senderId", "text", "createdAt"],
     additionalProperties: false,
     properties: Object.freeze({
       _id: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
       channelId: Object.freeze({ bsonType: "string", minLength: 1 }),
       senderId: Object.freeze({ bsonType: "string", minLength: 1 }),
-      text: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 4000 }),
-      createdAt: Object.freeze({ bsonType: "date" })
+      text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
+      createdAt: Object.freeze({ bsonType: "date" }),
+      attachments: Object.freeze({
+        bsonType: "array",
+        maxItems: 5,
+        items: Object.freeze({
+          bsonType: "object",
+          required: ["id", "name", "mimeType", "size", "publicId", "resourceType", "format"],
+          additionalProperties: false,
+          properties: Object.freeze({
+            id: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
+            name: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 255 }),
+            mimeType: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
+            size: Object.freeze({ bsonType: "int", minimum: 1, maximum: 10485760 }),
+            publicId: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 512 }),
+            resourceType: Object.freeze({ enum: ["image", "raw"] }),
+            format: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 32 })
+          })
+        })
+      })
     })
   })
 });
@@ -148,5 +178,9 @@ export const CHANNEL_MESSAGES_INDEXES = Object.freeze([
   Object.freeze({
     keys: Object.freeze({ channelId: 1, createdAt: -1, _id: -1 }),
     options: Object.freeze({ name: "channel_messages_chronological", unique: false })
+  }),
+  Object.freeze({
+    keys: Object.freeze({ text: "text" }),
+    options: Object.freeze({ name: "channel_messages_text", unique: false })
   })
 ]);

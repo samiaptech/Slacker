@@ -2,6 +2,8 @@ export type { ApiEnvironment } from "./environment/index.js";
 export type { ApiErrorCode, ApiErrorDetails, ApiErrorResponse } from "./errors/index.js";
 export type { ApiHealthResponse } from "./health/index.js";
 export type { RealtimeClientEvents, RealtimeServerEvents } from "./realtime/index.js";
+export type { ChatAttachmentResponse } from "./chat/index.js";
+export type { MessageSearchResponse, MessageSearchResult } from "./search/index.js";
 export type {
   DirectConversationListResponse,
   DirectConversationResponse,

@@ -1,3 +1,5 @@
+import type { ChatAttachmentResponse } from "../chat/index.js";
+
 export type ChannelResponse = Readonly<{
   id: string;
   workspaceId: string;
@@ -59,6 +61,7 @@ export type ChannelMessageResponse = Readonly<{
   senderId: string;
   text: string;
   createdAt: string;
+  attachments?: readonly ChatAttachmentResponse[];
   sender: Readonly<{
     id: string;
     name: string;

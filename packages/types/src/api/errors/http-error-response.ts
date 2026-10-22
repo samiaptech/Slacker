@@ -11,7 +11,10 @@ export type ApiErrorCode =
   | "channel_storage_unavailable"
   | "channel_join_not_allowed"
   | "channel_membership_conflict"
-  | "direct_message_storage_unavailable";
+  | "direct_message_storage_unavailable"
+  | "chat_attachment_storage_unavailable"
+  | "message_search_unavailable"
+  | "rate_limited";
 
 export type ApiErrorDetails = Readonly<Record<string, unknown>> | readonly unknown[];
 

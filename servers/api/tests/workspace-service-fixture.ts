@@ -59,7 +59,8 @@ export const createWorkspaceServiceFixture = (
       const actor = memberships.get(`${workspaceId}:${actorId}`);
       const targetKey = `${workspaceId}:${memberId}`;
       const target = memberships.get(targetKey);
-      if (!actor || actor.role !== "admin" || actorId === memberId) return Promise.resolve("denied");
+      const isSelfLeaving = actorId === memberId;
+      if (!actor || (!isSelfLeaving && actor.role !== "admin")) return Promise.resolve("denied");
       if (!target) return Promise.resolve("not-found");
       if (target.role === "admin"
         && [...memberships.values()].filter((membership) =>

@@ -352,3 +352,25 @@ test("rejects server consumers that bypass a feature root public API", async (co
 
   assert.equal(findings.filter(({ rule }) => rule === "feature-public-import").length, 1);
 });
+
+test("allows cross-feature imports through a categorized public index", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repo-feature-public-module-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const serverRoot = path.join(root, "servers", "api");
+  await mkdir(path.join(serverRoot, "features", "messages", "integrations"), { recursive: true });
+  await mkdir(path.join(serverRoot, "features", "channels", "public"), { recursive: true });
+  await writeFile(path.join(serverRoot, "features", "channels", "public", "index.ts"), "export const channelContract = true;\n", "utf8");
+  await writeFile(
+    path.join(serverRoot, "features", "messages", "integrations", "mongo-messages.integration.ts"),
+    "import { channelContract } from '../../channels/public/index.js';\nexport const contract = channelContract;\n",
+    "utf8"
+  );
+
+  const findings = await validateArchitectureBoundaries({
+    root,
+    architecture: { foundation: { ignoredDirectories: [] }, boundaries: {}, moduleBoundaries: [] },
+    projects: [{ name: "api", type: "server", root: "servers/api" }]
+  });
+
+  assert.equal(findings.filter(({ rule }) => rule === "feature-private-import").length, 0);
+});

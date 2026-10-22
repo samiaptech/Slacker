@@ -2,6 +2,7 @@ import "dotenv/config";
 import { createLogger } from "@workspace/logging";
 import { createApiConfig, readApiEnvironment } from "../config/index.js";
 import { apiRuntime } from "../constants/index.js";
+import { createMongoChannelMembershipCleanup } from "../features/channels/index.js";
 import { createMongoWorkspaceStorage } from "../features/workspaces/index.js";
 import { createMongoDbIntegration } from "../integrations/index.js";
 import { resolveLegacyWorkspaceMembers } from "./legacy-workspace-migration.js";
@@ -21,7 +22,11 @@ const database = createMongoDbIntegration({ uri: config.mongodbUri, logger });
 await database.connect();
 try {
   const mongoDatabase = database.getDatabase();
-  await createMongoWorkspaceStorage(mongoDatabase, database.withTransaction).initialize();
+  await createMongoWorkspaceStorage(
+    mongoDatabase,
+    database.withTransaction,
+    createMongoChannelMembershipCleanup(mongoDatabase)
+  ).initialize();
   const legacyWorkspaceId = process.env.LEGACY_WORKSPACE_ID?.trim() ?? process.env.WORKSPACE_ID?.trim();
   const legacyWorkspaceName = process.env.LEGACY_WORKSPACE_NAME?.trim() ?? process.env.WORKSPACE_NAME?.trim();
   if (legacyWorkspaceId && legacyWorkspaceName) {

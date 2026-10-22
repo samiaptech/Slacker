@@ -8,7 +8,9 @@ import type { ChannelMessageWithSender } from "../services/index.js";
 import { prepareCreateChannelCommand } from "../domain/index.js";
 import { createApp, createServer } from "../../../bootstrap/index.js";
 import type { AuthenticationIntegration } from "../../../integrations/index.js";
+import type { ChatAttachmentIntegration } from "../../../integrations/index.js";
 import type { ApiConfig } from "../../../types/index.js";
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import { createWorkspaceServiceFixture } from "../../../tests/workspace-service-fixture.js";
 
 const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
@@ -71,8 +73,10 @@ const startApi = async (
   ensureGeneralChannel: ChannelService["ensureGeneralChannel"] = () => Promise.resolve({ kind: "unavailable" }),
   messageService: ChannelMessageService = {
     list: () => Promise.resolve({ kind: "channel-unavailable" }),
-    send: () => Promise.resolve({ kind: "channel-unavailable" })
-  }
+    send: () => Promise.resolve({ kind: "channel-unavailable" }),
+    getAttachment: () => Promise.resolve({ kind: "not-found" })
+  },
+  attachmentStorage?: ChatAttachmentIntegration
 ) => {
   const workspaceFixture = createWorkspaceServiceFixture();
   workspaceFixture.seed("workspace-configured", [memberIdentity.id, otherMemberIdentity.id]);
@@ -82,6 +86,7 @@ const startApi = async (
     authentication,
     workspaceService: workspaceFixture.service,
     channelMessageService: messageService,
+    ...(attachmentStorage ? { attachmentStorage } : {}),
     channelService: {
       create,
       getForMember,
@@ -527,7 +532,8 @@ void test("lists and sends channel messages with current workspace authorization
           ? { kind: "sent" as const, message: { ...channelMessage, text, senderId: userId, sender: { ...channelMessage.sender, id: userId } } }
           : { kind: "channel-unavailable" as const }
       );
-    }
+    },
+    getAttachment: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -545,6 +551,104 @@ void test("lists and sends channel messages with current workspace authorization
 
   const history = await fetch(`${url}/channel-1/messages?limit=20`, {
     headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+
+  void test("uploads channel files only for members and serves them through authorized private downloads", async (context) => {
+    const attachment: ChatAttachmentRecord = {
+      id: "attachment-1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      size: 5,
+      publicId: "private/cloudinary/asset",
+      resourceType: "raw",
+      format: "txt"
+    };
+    let uploadCount = 0;
+    const messageService: ChannelMessageService = {
+      list: (_workspaceId, _channelId, userId) => Promise.resolve(
+        userId === memberIdentity.id
+          ? { kind: "listed" as const, messages: [], nextCursor: null }
+          : { kind: "channel-unavailable" as const }
+      ),
+      send: (_workspaceId, channelId, userId, text, files) => {
+        if ((files?.length ?? 0) > 0) uploadCount += 1;
+        return Promise.resolve({
+          kind: "sent" as const,
+          message: {
+            ...channelMessage,
+            id: "message-with-file",
+            channelId,
+            senderId: userId,
+            text,
+            attachments: (files?.length ?? 0) > 0 ? [attachment] : [],
+            sender: { ...channelMessage.sender, id: userId }
+          }
+        });
+      },
+      getAttachment: (_workspaceId, _channelId, userId) => Promise.resolve(
+        userId === memberIdentity.id
+          ? { kind: "found" as const, attachment }
+          : { kind: "not-found" as const }
+      )
+    };
+    const attachmentStorage: ChatAttachmentIntegration = {
+      upload: () => Promise.resolve(attachment),
+      delete: () => Promise.resolve(),
+      download: () => Promise.resolve(Buffer.from("notes"))
+    };
+    const { server, url } = await startApi(
+      createTestChannel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageService,
+      attachmentStorage
+    );
+    context.after(async () => server.stop());
+
+    const createForm = (): FormData => {
+      const form = new FormData();
+      form.append("text", "");
+      form.append("files", new Blob(["notes"], { type: "text/plain" }), "notes.txt");
+      return form;
+    };
+    const headers = { ...workspaceHeaders, "x-test-identity": "member" };
+    const sent = await fetch(`${url}/channel-1/messages`, {
+      method: "POST",
+      headers,
+      body: createForm()
+    });
+    assert.equal(sent.status, 201);
+    const sentBody = await sent.json() as {
+      attachments: readonly Readonly<{ id: string; name: string; mimeType: string; size: number; downloadUrl: string }>[];
+    };
+    assert.deepEqual(sentBody.attachments, [{
+      id: "attachment-1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      size: 5,
+      downloadUrl: "/channels/channel-1/messages/message-with-file/attachments/attachment-1"
+    }]);
+    assert.equal("publicId" in (sentBody.attachments[0] ?? {}), false);
+
+    const denied = await fetch(`${url}/channel-1/messages`, {
+      method: "POST",
+      headers: { ...workspaceHeaders, "x-test-identity": "other-member" },
+      body: createForm()
+    });
+    assert.equal(denied.status, 404);
+    assert.equal(uploadCount, 1);
+
+    const downloaded = await fetch(`${url}/channel-1/messages/message-with-file/attachments/attachment-1`, { headers });
+    assert.equal(downloaded.status, 200);
+    assert.equal(downloaded.headers.get("content-disposition"), "attachment; filename*=UTF-8''notes.txt");
+    assert.equal(downloaded.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(await downloaded.text(), "notes");
   });
   assert.equal(history.status, 200);
   assert.equal(history.headers.get("cache-control"), "no-store");

@@ -67,29 +67,6 @@ void test("validates channel member lists and member invitation results", () => 
     members: [member],
     canManage: true
   });
-
-  void test("validates channel message pages and rejects email fields from sender data", () => {
-    const message = {
-      id: "message-1",
-      channelId: "channel-1",
-      senderId: "user-1",
-      text: "Hello 🙂",
-      createdAt: "2026-10-15T12:00:00.000Z",
-      sender: { id: "user-1", name: "Workspace Member", image: null }
-    } as const;
-    assert.deepEqual(channelMessageListResponseSchema.parse({
-      messages: [message],
-      nextCursor: "opaque-cursor"
-    }).messages[0], message);
-    assert.equal(channelMessageListResponseSchema.safeParse({
-      messages: [{ ...message, sender: { ...message.sender, email: "private@example.test" } }],
-      nextCursor: null
-    }).success, false);
-    assert.equal(channelMessageListResponseSchema.safeParse({
-      messages: [{ ...message, text: "x".repeat(4_001) }],
-      nextCursor: null
-    }).success, false);
-  });
   assert.equal(channelMembersResponseSchema.safeParse({
     members: [{ ...member, role: "owner" }],
     canManage: true
@@ -103,6 +80,29 @@ void test("validates channel member lists and member invitation results", () => 
     },
     alreadyMember: false
   }).membership.userId, "user-2");
+});
+
+void test("validates channel message pages and rejects email fields from sender data", () => {
+  const message = {
+    id: "message-1",
+    channelId: "channel-1",
+    senderId: "user-1",
+    text: "Hello 🙂",
+    createdAt: "2026-10-15T12:00:00.000Z",
+    sender: { id: "user-1", name: "Workspace Member", image: null }
+  } as const;
+  assert.deepEqual(channelMessageListResponseSchema.parse({
+    messages: [message],
+    nextCursor: "opaque-cursor"
+  }).messages[0], { ...message, attachments: [] });
+  assert.equal(channelMessageListResponseSchema.safeParse({
+    messages: [{ ...message, sender: { ...message.sender, email: "private@example.test" } }],
+    nextCursor: null
+  }).success, false);
+  assert.equal(channelMessageListResponseSchema.safeParse({
+    messages: [{ ...message, text: "x".repeat(4_001) }],
+    nextCursor: null
+  }).success, false);
 });
 
 void test("validates channel form fields with the server's name and description limits", () => {

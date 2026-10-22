@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ChannelMessage, ChannelMessagePageQuery } from "../domain/index.js";
 import type { ChannelMessageRepository } from "../repositories/index.js";
+import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import { createChannelMessageService } from "../services/index.js";
 
 const message: ChannelMessage = Object.freeze({
@@ -21,7 +22,12 @@ const createService = (
   }>[]>
     = (ids) => Promise.resolve(ids.includes("user-1")
       ? [{ id: "user-1", name: "Channel Member", image: "https://example.test/avatar.png" }]
-      : [])
+      : []),
+  attachmentStorage?: Readonly<{
+    upload: (file: Readonly<{ buffer: Buffer; name: string; size: number }>) => Promise<ChatAttachmentRecord>;
+    delete: (attachment: ChatAttachmentRecord) => Promise<void>;
+    download: (attachment: ChatAttachmentRecord) => Promise<Buffer>;
+  }>
 ) => {
   const calls: Readonly<Record<string, unknown>>[] = [];
   const repository: ChannelMessageRepository = {
@@ -42,6 +48,7 @@ const createService = (
   };
   const service = createChannelMessageService({
     repository,
+    ...(attachmentStorage ? { attachmentStorage } : {}),
     createId: () => "message-created",
     now: () => new Date("2026-10-15T12:00:00.000Z"),
     findUsersByIds
@@ -95,10 +102,116 @@ void test("rejects empty or oversized text before persistence and derives author
   assert.equal(calls.filter((call) => call.operation === "send").length, 1);
 });
 
+void test("uses the authenticated sender profile without a post-persistence profile query", async () => {
+  let profileLookups = 0;
+  const { service } = createService({}, () => {
+    profileLookups += 1;
+    return Promise.resolve([]);
+  });
+
+  const result = await service.send(
+    "workspace-1",
+    "channel-1",
+    "user-1",
+    "Hello",
+    [],
+    { name: "Channel Member", image: null }
+  );
+
+  assert.equal(result.kind, "sent");
+  assert.deepEqual(result.message.sender, {
+    id: "user-1",
+    name: "Channel Member",
+    image: null
+  });
+  assert.equal(profileLookups, 0);
+});
+
 void test("keeps unavailable storage explicit instead of reporting a successful send", async () => {
   const storageError = Object.assign(new Error("migration required"), { kind: "channel-storage-unavailable" as const });
   const { service } = createService({
     findForMember: () => Promise.reject(storageError)
+  });
+
+  void test("stores private attachment metadata with a message and supports attachment-only sends", async () => {
+    const attachment: ChatAttachmentRecord = {
+      id: "attachment-1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      size: 4,
+      publicId: "nutshyll/chat/private-asset",
+      resourceType: "raw",
+      format: "txt"
+    };
+    const persisted: ChannelMessage[] = [];
+    const { service } = createService({
+      createForMember: (_workspaceId, _channelId, _userId, message) => {
+        persisted.push(message);
+        return Promise.resolve("created");
+      }
+    }, undefined, {
+      upload: () => Promise.resolve(attachment),
+      delete: () => Promise.resolve(),
+      download: () => Promise.resolve(Buffer.from("file"))
+    });
+
+    const result = await service.send("workspace-1", "channel-1", "user-1", "", [{
+      buffer: Buffer.from("file"),
+      name: "notes.txt",
+      size: 4
+    }]);
+    assert.equal(result.kind, "sent");
+    const savedMessage = persisted[0];
+    assert.ok(savedMessage);
+    assert.equal(savedMessage.text, "");
+    assert.deepEqual(savedMessage.attachments, [attachment]);
+  });
+
+  void test("deletes uploaded assets when persistence fails and avoids upload for non-members", async () => {
+    const attachment: ChatAttachmentRecord = {
+      id: "attachment-2",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      size: 4,
+      publicId: "nutshyll/chat/private-asset-2",
+      resourceType: "raw",
+      format: "txt"
+    };
+    let deleteCount = 0;
+    let uploadCount = 0;
+    const attachmentStorage = {
+      upload: () => {
+        uploadCount += 1;
+        return Promise.resolve(attachment);
+      },
+      delete: () => {
+        deleteCount += 1;
+        return Promise.resolve();
+      },
+      download: () => Promise.resolve(Buffer.alloc(0))
+    };
+    const storageError = Object.assign(new Error("database unavailable"), {
+      kind: "channel-storage-unavailable" as const
+    });
+    const failed = createService({
+      createForMember: () => Promise.reject(storageError)
+    }, undefined, attachmentStorage);
+    assert.equal((await failed.service.send("workspace-1", "channel-1", "user-1", "", [{
+      buffer: Buffer.from("file"),
+      name: "notes.txt",
+      size: 4
+    }])).kind, "unavailable");
+    assert.equal(deleteCount, 1);
+
+    const denied = createService({
+      findForMember: () => Promise.resolve({ kind: "channel-unavailable" as const })
+    }, undefined, attachmentStorage);
+    assert.equal((await denied.service.send("workspace-1", "channel-1", "user-2", "", [{
+      buffer: Buffer.from("file"),
+      name: "notes.txt",
+      size: 4
+    }])).kind, "channel-unavailable");
+    assert.equal(uploadCount, 1);
   });
   assert.deepEqual(
     await service.list("workspace-1", "channel-1", "user-1", { pageSize: 20, before: null }),

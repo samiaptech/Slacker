@@ -13,7 +13,10 @@ import {
   CHANNEL_MEMBERSHIPS_INDEXES
 } from "../models/index.js";
 import type { ChannelListQuery } from "../domain/index.js";
-import { createMongoChannelStorage } from "../integrations/index.js";
+import {
+  createMongoChannelMembershipCleanup,
+  createMongoChannelStorage
+} from "../integrations/index.js";
 
 type IndexDefinition = Readonly<{ keys: unknown; options: Readonly<{ name: string; unique: boolean; partialFilterExpression?: unknown }> }>;
 type CollectionDefinition = Readonly<{ validator: unknown; indexes: readonly IndexDefinition[] }>;
@@ -72,6 +75,77 @@ const makeDatabase = () => {
   const withTransaction: MongoTransaction = (operation) => operation({} as never);
   return { database: database as unknown as MongoDatabase, calls, withTransaction };
 };
+
+void test("cleans workspace channel memberships and revises only affected public and private channels", async () => {
+  const calls: unknown[] = [];
+  const channels = [
+    { _id: "public-channel", workspaceId: "workspace-1", membershipRevision: 2 },
+    { _id: "private-channel", workspaceId: "workspace-1", membershipRevision: 4 },
+    { _id: "foreign-channel", workspaceId: "workspace-2", membershipRevision: 7 }
+  ];
+  const memberships = [
+    { channelId: "public-channel", userId: "member-1" },
+    { channelId: "private-channel", userId: "member-1" },
+    { channelId: "foreign-channel", userId: "member-1" }
+  ];
+  const readRecord = (value: unknown): Readonly<Record<string, unknown>> =>
+    typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
+  const matchesIds = (filter: Readonly<Record<string, unknown>>, id: string): boolean => {
+    const idFilter = readRecord(filter._id);
+    return Array.isArray(idFilter.$in) && idFilter.$in.includes(id);
+  };
+  const database = {
+    collection: (name: string) => ({
+      find: (filter: unknown, options?: unknown) => {
+        calls.push({ operation: "find", name, filter, options });
+        const criteria = readRecord(filter);
+        const rows = name === CHANNEL_MEMBERSHIPS_COLLECTION
+          ? memberships.filter(({ userId }) => userId === criteria.userId)
+          : channels.filter(({ _id, workspaceId }) =>
+            workspaceId === criteria.workspaceId && matchesIds(criteria, _id));
+        return { toArray: () => Promise.resolve(rows) };
+      },
+      updateMany: (filter: unknown, update: unknown, options?: unknown) => {
+        calls.push({ operation: "updateMany", name, filter, update, options });
+        const criteria = readRecord(filter);
+        const increment = readRecord(readRecord(update).$inc).membershipRevision;
+        const affected = channels.filter(({ _id, workspaceId }) =>
+          workspaceId === criteria.workspaceId && matchesIds(criteria, _id));
+        if (typeof increment === "number") {
+          for (const channel of affected) channel.membershipRevision += increment;
+        }
+        return Promise.resolve({ matchedCount: affected.length });
+      },
+      deleteMany: (filter: unknown, options?: unknown) => {
+        calls.push({ operation: "deleteMany", name, filter, options });
+        const criteria = readRecord(filter);
+        const ids = readRecord(criteria.channelId).$in;
+        const removed = memberships.filter(({ channelId, userId }) =>
+          userId === criteria.userId && Array.isArray(ids) && ids.includes(channelId));
+        for (const membership of removed) memberships.splice(memberships.indexOf(membership), 1);
+        return Promise.resolve({ deletedCount: removed.length });
+      }
+    })
+  };
+  const cleanup = createMongoChannelMembershipCleanup(database as unknown as MongoDatabase);
+  const session = {} as never;
+
+  await cleanup(session, "workspace-1", "member-1");
+
+  assert.deepEqual(memberships, [{ channelId: "foreign-channel", userId: "member-1" }]);
+  assert.deepEqual(channels.map(({ _id, membershipRevision }) => [_id, membershipRevision]), [
+    ["public-channel", 3],
+    ["private-channel", 5],
+    ["foreign-channel", 7]
+  ]);
+  assert.equal(calls.some((call) =>
+    typeof call === "object" && call !== null && "operation" in call && call.operation === "deleteMany"
+      && "filter" in call && JSON.stringify(call.filter) === JSON.stringify({
+        userId: "member-1",
+        channelId: { $in: ["public-channel", "private-channel"] }
+      })
+  ), true);
+});
 
 void test("initializes validators and indexes for channels, memberships, and idempotency records", async () => {
   const { database, calls, withTransaction } = makeDatabase();

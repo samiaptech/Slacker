@@ -3,9 +3,15 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import HomePage from "../../app/(public)/page";
 
-test("composes environment-derived API configuration into the workspace boundary", () => {
+test("renders the accessible workspace loading shell with API configuration", () => {
+  const previousApiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   process.env.NEXT_PUBLIC_API_BASE_URL = "https://api.example.test";
-  const markup = renderToStaticMarkup(<HomePage />);
-  assert.match(markup, /Loading your workspaces/);
-  assert.match(markup, /max-w-none/);
+  try {
+    const markup = renderToStaticMarkup(<HomePage />);
+    assert.match(markup, /aria-label="Loading your workspace"/);
+    assert.match(markup, /workspace-loading-skeleton/);
+  } finally {
+    if (previousApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    else process.env.NEXT_PUBLIC_API_BASE_URL = previousApiUrl;
+  }
 });

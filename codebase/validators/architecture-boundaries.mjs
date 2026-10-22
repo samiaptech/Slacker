@@ -323,7 +323,9 @@ export const validateArchitectureBoundaries = async (workspace) => {
       }
       if (sourceFeature && targetFeature && sourceFeature.name !== targetFeature.name) {
         const targetRemainder = targetSegments.slice(targetFeature.index + 2);
-        const targetsPublicModule = targetRemainder.length === 1 && /^public(?:\.[^.]+)?$/.test(targetRemainder[0]);
+        const targetsPublicModule = (targetRemainder.length === 1 && /^public(?:\.[^.]+)?$/.test(targetRemainder[0]))
+          || (targetRemainder.length === 2 && targetRemainder[0] === "public"
+            && /^index(?:\.[^.]+)?$/.test(targetRemainder[1]));
         if (!targetsPublicModule) {
           findings.push(issue(workspace.root, filePath, specifier, "feature-private-import", `feature ${sourceFeature.name} cannot import private internals of feature ${targetFeature.name}; expose an explicit public module.`));
         }

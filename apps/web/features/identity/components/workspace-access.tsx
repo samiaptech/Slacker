@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import { Button, Input, Label, PageShell } from "@workspace/ui";
+import { Skeleton } from "@workspace/ui/primitives";
 import { z } from "zod";
 import type {
   WorkspaceAccessResponse,
@@ -38,6 +39,43 @@ const inviteLinkSchema = z.object({
 }) satisfies z.ZodType<WorkspaceInviteLinkResponse>;
 const workspaceStorageUnavailableMessage = "Workspace storage is not initialized. Run `pnpm --filter @workspace/api workspaces:initialize`, then restart the API.";
 
+const WorkspaceLoadingSkeleton = (): ReactElement => (
+  <div aria-label="Loading your workspace" className="workspace-layout workspace-loading-skeleton" role="status">
+    <span className="sr-only">Loading your workspace…</span>
+    <div aria-hidden="true" className="workspace-layout-rail workspace-loading-rail">
+      <span className="flex size-10 items-center justify-center rounded-xl bg-[#b8e3d1] font-bold text-[#173b3a]">N</span>
+    </div>
+    <aside aria-hidden="true" className="workspace-layout-sidebar is-mobile-open workspace-loading-sidebar hidden min-[420px]:flex">
+      <div className="workspace-sidebar-brand">
+        <div>
+          <p className="font-semibold text-white">Nutshyll</p>
+          <p className="mt-1 text-xs text-white/55">Your team workspace</p>
+        </div>
+      </div>
+    </aside>
+    <div aria-hidden="true" className="workspace-layout-content">
+      <div className="workspace-main-header">
+        <div className="w-full space-y-2">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="h-3 w-56 max-w-full" />
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-6 p-6 sm:p-8">
+        <Skeleton className="h-12 w-full rounded-xl" />
+        <div className="mt-2 flex items-start gap-3">
+          <Skeleton className="size-9 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2"><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-4/5" /></div>
+        </div>
+        <div className="flex items-start gap-3">
+          <Skeleton className="size-9 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2"><Skeleton className="h-4 w-32" /><Skeleton className="h-4 w-3/5" /></div>
+        </div>
+        <div className="mt-auto"><Skeleton className="h-16 w-full rounded-2xl" /></div>
+      </div>
+    </div>
+  </div>
+);
+
 export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: WorkspaceAccessProps): ReactElement => {
   const authenticationClient = useMemo(() => createAuthenticationClient(apiBaseUrl), [apiBaseUrl]);
   const [stage, setStage] = useState<PageStage>("loading");
@@ -55,11 +93,24 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     const controller = new AbortController();
     const loadWorkspaces = async (): Promise<void> => {
       try {
-        const response = await fetch(new URL("/workspaces", apiBaseUrl), {
+        const storedWorkspaceId = window.localStorage.getItem("nutshyll.activeWorkspaceId");
+        const workspaceRequest = fetch(new URL("/workspaces", apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           signal: controller.signal
         });
+        const storedAccessRequest = storedWorkspaceId
+          ? fetch(new URL("/workspace", apiBaseUrl), {
+            credentials: "include",
+            cache: "no-store",
+            headers: { "X-Workspace-Id": storedWorkspaceId },
+            signal: controller.signal
+          })
+          : Promise.resolve(null);
+        const [response, storedAccessResponse] = await Promise.all([
+          workspaceRequest,
+          storedAccessRequest
+        ]);
         if (response.status === 401) {
           window.location.assign(new URL("/sign-in", window.location.origin));
           return;
@@ -77,16 +128,21 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
           return;
         }
         setWorkspaces(parsed.data.workspaces);
-        const storedId = window.localStorage.getItem("nutshyll.activeWorkspaceId");
-        const selected = parsed.data.workspaces.find((workspace) => workspace.id === storedId)
+        const selected = parsed.data.workspaces.find((workspace) => workspace.id === storedWorkspaceId)
           ?? parsed.data.workspaces[0];
         if (!selected) throw new Error("No workspace is available.");
-        const accessResponse = await fetch(new URL("/workspace", apiBaseUrl), {
-          credentials: "include",
-          cache: "no-store",
-          headers: { "X-Workspace-Id": selected.id },
-          signal: controller.signal
-        });
+        const accessResponse = selected.id === storedWorkspaceId && storedAccessResponse
+          ? storedAccessResponse
+          : await fetch(new URL("/workspace", apiBaseUrl), {
+            credentials: "include",
+            cache: "no-store",
+            headers: { "X-Workspace-Id": selected.id },
+            signal: controller.signal
+          });
+        if (accessResponse.status === 401) {
+          window.location.assign(new URL("/sign-in", window.location.origin));
+          return;
+        }
         if (accessResponse.status === 503) {
           setErrorMessage(workspaceStorageUnavailableMessage);
           setStage("error");
@@ -115,6 +171,24 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     setActiveWorkspace(selected);
     setAccess({ ...access, workspace: { id: selected.id, name: selected.name } });
     window.localStorage.setItem("nutshyll.activeWorkspaceId", selected.id);
+  };
+
+  const leaveWorkspace = async (): Promise<void> => {
+    if (!activeWorkspace || !access) throw new Error("No active workspace is available.");
+    const response = await fetch(new URL(
+      `/workspaces/${encodeURIComponent(activeWorkspace.id)}/members/${encodeURIComponent(access.user.id)}`,
+      apiBaseUrl
+    ), { method: "DELETE", credentials: "include", cache: "no-store" });
+    if (response.status === 401) {
+      window.location.assign(new URL("/sign-in", window.location.origin));
+      return;
+    }
+    if (response.status === 409) throw new Error("You are the last workspace admin. Assign another admin before leaving.");
+    if (!response.ok) throw new Error("You could not leave this workspace. Please try again.");
+    const nextWorkspace = workspaces.find((workspace) => workspace.id !== activeWorkspace.id);
+    if (nextWorkspace) window.localStorage.setItem("nutshyll.activeWorkspaceId", nextWorkspace.id);
+    else window.localStorage.removeItem("nutshyll.activeWorkspaceId");
+    window.location.assign("/");
   };
 
   const setCurrentUserProfile = (profile: Readonly<{ name: string; title: string | null }>): void => {
@@ -218,12 +292,12 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
   };
 
   return (
-    <PageShell {...(fullWidth ? { className: "max-w-none px-3 py-3 sm:px-4 sm:py-4" } : {})}>
+    <PageShell {...(fullWidth ? { className: "app-viewport-shell" } : {})}>
       <main className={fullWidth
         ? "flex min-h-0 w-full flex-1 flex-col"
         : "mx-auto flex min-h-[70vh] w-full max-w-5xl flex-col justify-center"}>
         {stage === "loading" ? (
-          <p className="text-sm text-muted-foreground" role="status">Loading your workspaces…</p>
+          fullWidth ? <WorkspaceLoadingSkeleton /> : <p className="text-sm text-muted-foreground" role="status">Loading your workspaces…</p>
         ) : stage === "error" ? (
           <section className="rounded-xl border border-border bg-card p-8">
             <h1 className="text-xl font-semibold text-foreground">Workspaces unavailable</h1>
@@ -277,43 +351,36 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
             workspaces,
             currentUser: access.user,
             selectWorkspace,
+            leaveWorkspace,
+            startCreatingWorkspace: () => { setWorkspaceName(""); setErrorMessage(null); setStage("create"); },
+            signOut,
             setCurrentUserProfile
           }}>
             <section
               aria-labelledby="workspace-title"
               className={fullWidth
-                ? "flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-3 sm:p-4"
+                ? "flex min-h-0 flex-1 flex-col bg-background"
                 : "rounded-xl border border-border bg-card p-8"}
             >
-              <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-primary">Workspace</p>
-                  <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground" id="workspace-title">
-                    {access.workspace.name}
-                  </h1>
-                  <p className="mt-2 text-sm text-muted-foreground">Signed in as {access.user.email}</p>
+              {!fullWidth && (
+                <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-primary">Workspace</p>
+                    <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground" id="workspace-title">{access.workspace.name}</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">Signed in as {access.user.email}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {workspaces.length > 1 ? (
+                      <select aria-label="Switch workspace" className="h-10 rounded-md border border-input bg-background px-3 text-sm" onChange={(event) => selectWorkspace(event.currentTarget.value)} value={activeWorkspace.id}>
+                        {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+                      </select>
+                    ) : null}
+                    <Button onClick={() => { setWorkspaceName(""); setErrorMessage(null); setStage("create"); }} type="button" variant="outline">New workspace</Button>
+                    <Button onClick={() => void signOut()} type="button" variant="outline">Sign out</Button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {workspaces.length > 1 ? (
-                    <select
-                      aria-label="Switch workspace"
-                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      onChange={(event) => selectWorkspace(event.currentTarget.value)}
-                      value={activeWorkspace.id}
-                    >
-                      {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-                    </select>
-                  ) : null}
-                  <Button onClick={() => { setWorkspaceName(""); setErrorMessage(null); setStage("create"); }} type="button" variant="outline">
-                    New workspace
-                  </Button>
-                  <Button onClick={() => void signOut()} type="button" variant="outline">Sign out</Button>
-                </div>
-              </div>
-              <div className={fullWidth
-                ? "flex min-h-0 flex-1 flex-col border-t border-border pt-1"
-                : "border-t border-border pt-1"}
-              >
+              )}
+              <div className={fullWidth ? "flex min-h-0 flex-1 flex-col" : "border-t border-border pt-1"}>
                 {children}
               </div>
             </section>

@@ -31,6 +31,42 @@ void test("derives API configuration from validated environment input", () => {
   });
 });
 
+void test("requires Cloudinary credentials as a complete optional configuration", () => {
+  assert.throws(() => readApiEnvironment({
+    NODE_ENV: "test",
+    API_HOST: "127.0.0.1",
+    API_PORT: "4000",
+    WEB_ORIGIN: "http://localhost:3000",
+    MONGODB_URI: "mongodb://localhost/workspace",
+    BETTER_AUTH_URL: "http://localhost:4000",
+    BETTER_AUTH_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    LOG_LEVEL: "silent",
+    CLOUDINARY_CLOUD_NAME: "cloud-name"
+  }), ZodError);
+  const configured = createApiConfig(readApiEnvironment({
+    NODE_ENV: "test",
+    API_HOST: "127.0.0.1",
+    API_PORT: "4000",
+    WEB_ORIGIN: "http://localhost:3000",
+    MONGODB_URI: "mongodb://localhost/workspace",
+    BETTER_AUTH_URL: "http://localhost:4000",
+    BETTER_AUTH_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    LOG_LEVEL: "silent",
+    CLOUDINARY_CLOUD_NAME: "cloud-name",
+    CLOUDINARY_API_KEY: "cloud-key",
+    CLOUDINARY_API_SECRET: "cloud-secret"
+  }));
+  assert.deepEqual(configured.cloudinary, {
+    cloudName: "cloud-name",
+    apiKey: "cloud-key",
+    apiSecret: "cloud-secret"
+  });
+});
+
 void test("rejects invalid server environment input", () => {
   assert.throws(() => readApiEnvironment({ API_PORT: "70000" }));
   assert.throws(() => readApiEnvironment({

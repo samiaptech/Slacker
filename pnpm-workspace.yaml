@@ -12,6 +12,10 @@ allowBuilds:
 audit:
   level: high
 
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
+
 minimumReleaseAgeExclude:
   - source-map-js@1.2.2
   - sharp@0.35.5

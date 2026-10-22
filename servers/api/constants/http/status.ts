@@ -5,6 +5,8 @@ export const HTTP_STATUS = Object.freeze({
   unauthorized: 401,
   forbidden: 403,
   conflict: 409,
+  payloadTooLarge: 413,
+  tooManyRequests: 429,
   created: 201,
   serviceUnavailable: 503,
   notFound: 404,

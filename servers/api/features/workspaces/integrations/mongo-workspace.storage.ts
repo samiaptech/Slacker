@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
-import type { MongoDatabase, MongoTransaction } from "../../../integrations/mongodb/index.js";
+import type {
+  MongoDatabase,
+  MongoTransaction,
+  MongoTransactionSession
+} from "../../../integrations/mongodb/index.js";
 import {
   WORKSPACE_COLLECTION_VALIDATORS,
   WORKSPACE_INDEXES,
@@ -49,6 +53,12 @@ const persistenceError = (error: unknown): unknown => {
   return error;
 };
 
+export type WorkspaceLeaveCleanup = (
+  session: MongoTransactionSession,
+  workspaceId: string,
+  userId: string
+) => Promise<void>;
+
 const ensureCollection = async (database: MongoDatabase, collectionName: string, validator: unknown): Promise<void> => {
   try {
     await database.createCollection(collectionName, {
@@ -69,7 +79,8 @@ const ensureCollection = async (database: MongoDatabase, collectionName: string,
 
 export const createMongoWorkspaceStorage = (
   database: MongoDatabase,
-  withTransaction: MongoTransaction
+  withTransaction: MongoTransaction,
+  cleanupChannelMemberships: WorkspaceLeaveCleanup
 ): WorkspaceStorage => {
   const workspaces = database.collection<WorkspaceDocument>(WORKSPACES_COLLECTION);
   const memberships = database.collection<WorkspaceMembershipDocument>(WORKSPACE_MEMBERSHIPS_COLLECTION);
@@ -97,9 +108,10 @@ export const createMongoWorkspaceStorage = (
       indexes: () => inviteLinks.indexes()
     }
   ];
+  let readiness: Promise<void> | null = null;
   const ensureReady = async (): Promise<void> => {
-    try {
-      for (const entry of collections) {
+    if (!readiness) {
+      readiness = Promise.all(collections.map(async (entry) => {
         const metadata: unknown = await database.listCollections({ name: entry.name }).next();
         const options = isRecord(metadata) && isRecord(metadata.options) ? metadata.options : null;
         if (!options || !isDeepStrictEqual(options.validator, entry.validator)) throw unavailableError;
@@ -112,10 +124,16 @@ export const createMongoWorkspaceStorage = (
             throw unavailableError;
           }
         }
-      }
+      })).then(() => undefined).catch((error: unknown) => {
+        throw persistenceError(error);
+      });
+    }
+    const currentReadiness = readiness;
+    try {
+      await currentReadiness;
     } catch (error: unknown) {
-      if (error === unavailableError) throw error;
-      throw persistenceError(error);
+      if (readiness === currentReadiness) readiness = null;
+      throw error;
     }
   };
   const mutateMembership = async (
@@ -130,8 +148,14 @@ export const createMongoWorkspaceStorage = (
       return await withTransaction(async (session) => {
         const actor = await memberships.findOne({ workspaceId, userId: actorId }, { session });
         const target = await memberships.findOne({ workspaceId, userId: memberId }, { session });
-        if (!actor || actor.role !== "admin") return "denied";
+        const isSelfLeaving = operation === "remove" && actorId === memberId;
+        if (!actor || (!isSelfLeaving && actor.role !== "admin")) return "denied";
         if (!target) return "not-found";
+
+        if (target.role === "admin" && (operation === "remove" || role === "member")) {
+          const adminCount = await memberships.countDocuments({ workspaceId, role: "admin" }, { session });
+          if (adminCount <= 1) return "last-admin";
+        }
 
         const workspaceUpdate = await workspaces.updateOne(
           { _id: workspaceId },
@@ -140,12 +164,8 @@ export const createMongoWorkspaceStorage = (
         );
         if (workspaceUpdate.matchedCount === 0) return "not-found";
 
-        if (target.role === "admin" && (operation === "remove" || role === "member")) {
-          const adminCount = await memberships.countDocuments({ workspaceId, role: "admin" }, { session });
-          if (adminCount <= 1) return "last-admin";
-        }
-
         if (operation === "remove") {
+          await cleanupChannelMemberships(session, workspaceId, memberId);
           const result = await memberships.deleteOne({ workspaceId, userId: memberId }, { session });
           return result.deletedCount > 0 ? "removed" : "not-found";
         }

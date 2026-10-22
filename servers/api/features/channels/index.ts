@@ -32,6 +32,7 @@ export type {
 } from "./repositories/index.js";
 export type { ChannelMessageRepository, ChannelMessageStorage } from "./repositories/index.js";
 export { createMongoChannelStorage } from "./integrations/index.js";
+export { createMongoChannelMembershipCleanup } from "./integrations/index.js";
 export { createMongoChannelMessageStorage } from "./integrations/index.js";
 export { createChannelService } from "./services/index.js";
 export { createChannelMessageService } from "./services/index.js";
