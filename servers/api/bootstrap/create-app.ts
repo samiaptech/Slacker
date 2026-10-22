@@ -24,6 +24,7 @@ import { createCorsMiddleware, createErrorHandler, createNotFoundHandler } from 
 type AppDependencies = Readonly<{
   config: ApiConfig;
   logger: Logger;
+  appInstance?: Express;
   authentication: AuthenticationIntegration;
   attachmentStorage?: ChatAttachmentIntegration;
   channelService: ChannelService;
@@ -38,6 +39,7 @@ type AppDependencies = Readonly<{
 export const createApp = ({
   config,
   logger,
+  appInstance = express(),
   authentication,
   attachmentStorage,
   channelService,
@@ -48,7 +50,7 @@ export const createApp = ({
   messageSearchService,
   workspaceService
 }: AppDependencies): Express => {
-  const app = express();
+  const app = appInstance;
   app.disable("x-powered-by");
   app.use(createHttpLogger({
     logger,

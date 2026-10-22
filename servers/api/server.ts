@@ -1,4 +1,5 @@
 import "dotenv/config";
+import express from "express";
 import { createLogger } from "@workspace/logging";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createApp, createServer, createShutdown } from "./bootstrap/index.js";
@@ -145,6 +146,7 @@ const directMessageRealtime = createDirectMessageRealtime({ socketIo, service: d
 const app = createApp({
   config,
   logger,
+  appInstance: express(),
   authentication,
   ...(attachmentStorage ? { attachmentStorage } : {}),
   channelService,
@@ -157,17 +159,20 @@ const app = createApp({
 });
 const server = createServer({ app, config, logger });
 socketIo.attach(server.raw);
-const shutdown = createShutdown({ database, logger, server, socketIo });
+export default app;
 
-await server.start();
+if (process.env.VERCEL !== "1") {
+  const shutdown = createShutdown({ database, logger, server, socketIo });
+  await server.start();
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown(signal)
-      .then(() => process.exit(0))
-      .catch((error: unknown) => {
-        logger.error("API shutdown failed.", { error: error instanceof Error ? error.message : String(error) });
-        process.exit(1);
-      });
-  });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      void shutdown(signal)
+        .then(() => process.exit(0))
+        .catch((error: unknown) => {
+          logger.error("API shutdown failed.", { error: error instanceof Error ? error.message : String(error) });
+          process.exit(1);
+        });
+    });
+  }
 }

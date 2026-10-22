@@ -293,14 +293,21 @@ Updated: 2026-10-22.
   timing in a populated browser. Continue production UI decomposition where cohesive
   boundaries improve readability. User: confirm local web/API configuration uses localhost
   and restart both apps if it is stale. The user is preparing a Vercel production
-  deployment. A provisional root `vercel.json` routes the `web` and `api` services on one
-  domain, using `X-Workspace-Id` to distinguish channel API requests from Next.js channel
-  pages. No inter-service bindings are needed because the browser calls the API through
-  public routes. The config and public path choices are awaiting user confirmation; no
-  deployment was made. Backend agent: confirm the API's Vercel Functions/WebSocket runtime
-  compatibility and add cross-instance Socket.IO pub/sub before production; Socket.IO
-  rooms and the message-search limiter are currently process-local. No files were staged,
-  committed, or pushed. Revisit the `braces` advisory when a patched release is available.
+  deployment. Root `vercel.json` routes the `web` and `api` services on one domain, using
+  `X-Workspace-Id` to distinguish channel API requests from Next.js channel pages. It was
+  pushed to `samiaptech/Slacker:main` as `05ebe11`. The first Vercel build succeeded for
+  web but failed to detect the API Express entrypoint. The API entrypoint now directly
+  imports Express, injects the instance into `createApp`, exports the Express app as Vercel
+  documents, and only starts the wrapped HTTP/Socket.IO server for local development.
+  Focused API typecheck, ESLint, and 18 relevant tests passed; `git diff --check` passed.
+  A Vercel build remains unverified: the repository has no linked `.vercel` project and
+  Vercel CLI is not installed. **Next:** link/run the API Services build and verify its
+  runtime behavior. Socket.IO WebSocket operation on Vercel is not established by the
+  Express build fix; assess platform support and cross-instance pub/sub before claiming
+  production realtime reliability. The search limiter is also process-local. Do not use
+  `pnpm run initialize` as a build/start command; production database initialization is a
+  deliberate one-time operation. No files were staged, committed, or pushed. Revisit the
+  `braces` advisory when a patched release is available.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`
