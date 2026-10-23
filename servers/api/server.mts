@@ -162,7 +162,7 @@ const app = createApp({
 });
 const server = createServer({ app, config, logger });
 socketIo.attach(server.raw);
-export default app;
+export default server.raw;
 
 if (!isVercelRuntime) {
   const shutdown = createShutdown({ database, logger, server, socketIo });

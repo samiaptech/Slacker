@@ -42,7 +42,10 @@ export const ChannelRealtimeProvider = ({
   const workspaceRevokedRef = useRef(false);
 
   useEffect(() => {
-    const connection = io(apiBaseUrl, { withCredentials: true });
+    const connection = io(apiBaseUrl, {
+      withCredentials: true,
+      transports: ["websocket"]
+    });
     const onConnect = (): void => {
       setStatus("connected");
       setWorkspaceReady(false);

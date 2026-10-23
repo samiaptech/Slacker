@@ -15,6 +15,7 @@ const createTestSocket = (origin: string, identity: string): TestSocket =>
     autoConnect: false,
     extraHeaders: { Cookie: `session=${identity}` },
     reconnection: false,
+    transports: ["websocket"],
     timeout: 2_000
   });
 

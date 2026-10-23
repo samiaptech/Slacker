@@ -305,13 +305,17 @@ Updated: 2026-10-22.
   contains only Node built-in imports; `dotenv/config` loads only outside Vercel. The
   committed-entrypoint fix was pushed to `samiaptech/Slacker:main` as `77743bb`. API
   typecheck/lint, 19 focused tests, bundle syntax/import inspection, dependency audit,
-  secret scan, and repository check pass. **Next:** deploy commit `77743bb`; the configured
-  entrypoint now exists in the source checkout before build validation. Confirm Vercel runs
-  `build:vercel`, then verify `/health` and `/workspaces`. Active web origin:
-  `https://slacker-tifi.vercel.app`. Socket.IO WebSocket
-  operation and cross-instance pub/sub on Vercel remain unverified; the search limiter is
-  process-local. Do not use `pnpm run initialize` as a build/start command. Next.js is
-  patched at 16.4.1 (`7214f5d`); revisit the `braces` advisory when patched.
+  secret scan, and repository check pass. Active web origin: `https://slacker-tifi.vercel.app`.
+  Socket.IO now exports the HTTP server with its upgrade handler attached, and the browser
+  client uses WebSocket-only transport as required by Vercel Functions. The focused
+  Socket.IO integration tests pass with WebSocket transport; API/web typechecks and bundle
+  generation pass. Redeploy and verify that `/socket.io/?EIO=4&transport=websocket` upgrades
+  successfully and that two clients receive live updates. Cross-instance Socket.IO pub/sub
+  is not configured; validate multi-instance behavior and add a shared adapter if needed.
+  These changes remain uncommitted on local branch `slacker`; push/deployment is pending.
+  The search limiter remains process-local. Do not use `pnpm run initialize` as a build/start
+  command. Next.js is patched at 16.4.1 (`7214f5d`); revisit the `braces` advisory when
+  patched.
 
 - **Channel storage readiness fix:** The runtime readiness check compared MongoDB's
   normalized text-index key (`_fts`/`_ftsx`) against the original `{ text: "text" }`
