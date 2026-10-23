@@ -56,6 +56,11 @@ const attachmentStorage = config.cloudinary
   ? createCloudinaryIntegration(config.cloudinary)
   : undefined;
 const mongoDatabase = database.getDatabase();
+const socketAdapterCollection = mongoDatabase.collection("socket_io_adapter_events");
+await socketAdapterCollection.createIndex(
+  { createdAt: 1 },
+  { expireAfterSeconds: 3600 }
+);
 const cleanupChannelMemberships = createMongoChannelMembershipCleanup(mongoDatabase);
 const workspaceRepository = createWorkspaceRepository(
   createMongoWorkspaceStorage(mongoDatabase, database.withTransaction, cleanupChannelMemberships)
@@ -133,7 +138,8 @@ const workspaceService = createWorkspaceService({
 const socketIo = createSocketIoIntegration({
   webOrigin: config.webOrigin,
   getIdentity: authentication.getIdentity,
-  logger
+  logger,
+  adapterCollection: socketAdapterCollection
 });
 const channelRealtime = createChannelRealtime({
   socketIo,

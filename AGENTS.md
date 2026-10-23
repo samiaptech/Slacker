@@ -311,8 +311,7 @@ Updated: 2026-10-23.
   Socket.IO integration tests pass with WebSocket transport; API/web typechecks and bundle
   generation pass. Redeploy and verify that `/socket.io/?EIO=4&transport=websocket` upgrades
   successfully and that two clients receive live updates. Cross-instance Socket.IO pub/sub
-  is not configured; validate multi-instance behavior and add a shared adapter if needed.
-  These changes remain uncommitted on local branch `slacker`; push/deployment is pending.
+  now uses a MongoDB change-stream adapter; validate multi-instance behavior after deployment.
   The search limiter remains process-local. Do not use `pnpm run initialize` as a build/start
   command. Next.js is patched at 16.4.1 (`7214f5d`); revisit the `braces` advisory when
   patched.
@@ -345,10 +344,14 @@ Updated: 2026-10-23.
   was run. Restart/redeploy the API to use these changes; Codex owns the pending frontend
   optimistic-send behavior listed above.
 
-- **Vercel API bundle build fix:** Deployment `f0e0741` successfully built the web app but
-  API bundling failed because `@workspace/logging` exposes generated `dist/index.js`, which
-  the API filtered install does not build. The API `build:vercel` script now builds the
-  logging workspace dependency before invoking esbuild, and the task is registered in the
-  API project manifest. The local Vercel bundle build and repository checks pass; the fix is
-  uncommitted on branch `slacker`. Commit and push, then verify Vercel completes the API
-  bundle step and confirm health/realtime after deployment.
+- **Cross-instance chat delivery fix (in progress):** The deployed Socket.IO connection
+  showed connected, but new chat messages appeared only after refresh because Vercel can
+  process the WebSocket and HTTP send request on different function instances. Socket.IO now
+  uses the Atlas MongoDB change-stream adapter for cross-instance room broadcasts. Runtime
+  creates a TTL index for transient adapter events (one-hour expiry); the adapter and
+  Mongoose use the same pinned MongoDB 7.6 driver. API tests passed (135 passed, 2 optional
+  replica-set integration tests skipped); API typecheck/lint, Vercel bundle build, bundle
+  syntax check, repository check, and `git diff --check` passed. Cross-instance delivery was
+  not tested against a live isolated replica set because `MONGODB_TEST_URI` was not provided.
+  The fix is implemented on branch `slacker`; production deployment and multi-client
+  verification remain pending. Presence still uses process-local tracking.

@@ -1,4 +1,6 @@
 import type { IncomingHttpHeaders, Server as HttpServer } from "node:http";
+import { createAdapter as createMongoAdapter } from "@socket.io/mongo-adapter";
+import type { Collection } from "mongodb";
 import { Server } from "socket.io";
 import type { RealtimeClientEvents, RealtimeServerEvents } from "@workspace/types";
 import type { Logger } from "@workspace/logging";
@@ -19,12 +21,14 @@ type SocketIoDependencies = Readonly<{
   webOrigin: string;
   getIdentity: (headers: IncomingHttpHeaders) => Promise<AuthenticationIdentity | null>;
   logger: Logger;
+  adapterCollection?: Collection;
 }>;
 
 export const createSocketIoIntegration = ({
   webOrigin,
   getIdentity,
-  logger
+  logger,
+  adapterCollection
 }: SocketIoDependencies): SocketIoApi => {
   const io = new Server<
     RealtimeClientEvents,
@@ -35,6 +39,10 @@ export const createSocketIoIntegration = ({
     cors: { origin: webOrigin, credentials: true },
     serveClient: false
   });
+  if (adapterCollection) {
+    io.adapter(createMongoAdapter(adapterCollection, { addCreatedAtField: true }));
+    logger.info("Socket.IO MongoDB adapter enabled for cross-instance broadcasts.");
+  }
 
   io.use((socket, next) => {
     const origin = socket.handshake.headers.origin;

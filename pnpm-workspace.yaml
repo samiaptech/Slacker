@@ -5,6 +5,9 @@ packages:
   - "prebuilt/*"
   - "prebuilt/*/*"
 
+overrides:
+  '@socket.io/mongo-adapter>mongodb': 7.6.0
+
 allowBuilds:
   esbuild: true
   unrs-resolver: true
