@@ -10,6 +10,7 @@
     "channels:initialize": { "command": "pnpm run channels:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
     "direct-messages:initialize": { "command": "pnpm run direct-messages:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
     "workspaces:initialize": { "command": "pnpm run workspaces:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
+    "build:vercel": { "command": "pnpm run build:vercel", "outputs": ["vercel/server.mjs"], "cache": false },
     "build": { "command": "pnpm run build", "outputs": ["dist"], "cache": true },
     "test": { "command": "pnpm test", "cache": false },
     "lint": { "command": "pnpm run lint", "cache": false },

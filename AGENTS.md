@@ -345,10 +345,10 @@ Updated: 2026-10-23.
   was run. Restart/redeploy the API to use these changes; Codex owns the pending frontend
   optimistic-send behavior listed above.
 
-- **Vercel web build fix:** Deployment `700cdb5` failed because `@workspace/ui` exports
-  generated files from `packages/ui/dist`, which is ignored and was not built by Vercel's
-  direct `next build`. The web `build` script now builds `@workspace/ui` before Next.js.
-  Production web build passed with a non-secret API URL override; web tests (20), typecheck,
-  and `git diff --check` passed. ESLint was not applicable to the JSON manifest. This fix is
-  uncommitted on local branch `slacker`; redeploy after push and confirm Vercel resolves the
-  shared UI package.
+- **Vercel API bundle build fix:** Deployment `f0e0741` successfully built the web app but
+  API bundling failed because `@workspace/logging` exposes generated `dist/index.js`, which
+  the API filtered install does not build. The API `build:vercel` script now builds the
+  logging workspace dependency before invoking esbuild, and the task is registered in the
+  API project manifest. The local Vercel bundle build and repository checks pass; the fix is
+  uncommitted on branch `slacker`. Commit and push, then verify Vercel completes the API
+  bundle step and confirm health/realtime after deployment.
