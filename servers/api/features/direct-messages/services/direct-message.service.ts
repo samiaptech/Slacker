@@ -4,6 +4,7 @@ import {
   validateDirectMessageText,
   type DirectConversation,
   type DirectMessage,
+  type DirectMessageDeleteScope,
   type DirectMessagePageQuery
 } from "../domain/index.js";
 import type { DirectMessageRepository } from "../repositories/index.js";
@@ -99,6 +100,36 @@ export const createDirectMessageService = ({
         conversation: await withParticipant(result.conversation, creatorId, findUsersByIds),
         created: result.created
       });
+    } catch (error: unknown) {
+      if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });
+      throw error;
+    }
+  },
+  deleteMessage: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    scope: DirectMessageDeleteScope,
+    isWorkspaceAdmin: boolean
+  ) => {
+    try {
+      const result = await repository.deleteMessageForMember(
+        workspaceId,
+        conversationId,
+        userId,
+        messageId,
+        scope,
+        isWorkspaceAdmin
+      );
+      if (result.kind !== "deleted") return result;
+      if (scope === "me" || result.attachments.length === 0) return Object.freeze({ kind: "deleted" as const });
+      if (!attachmentStorage) return Object.freeze({ kind: "attachment-cleanup-failed" as const });
+      const cleanup = await Promise.allSettled(result.attachments.map(async (attachment) =>
+        attachmentStorage.delete(attachment)));
+      return cleanup.some(({ status }) => status === "rejected")
+        ? Object.freeze({ kind: "attachment-cleanup-failed" as const })
+        : Object.freeze({ kind: "deleted" as const });
     } catch (error: unknown) {
       if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });
       throw error;

@@ -28,7 +28,7 @@ export type WorkspaceAccessResult =
   | Readonly<{ kind: "denied" }>
   | Readonly<{ kind: "unavailable" }>
   | Readonly<{ kind: "allowed"; access: Readonly<{
-      workspace: Readonly<{ id: string; name: string }>;
+      workspace: Readonly<{ id: string; name: string; role: "admin" | "member" }>;
       user: WorkspaceIdentity;
     }> }>;
 
@@ -303,7 +303,7 @@ export const createWorkspaceService = ({
       return Object.freeze({
         kind: "allowed",
         access: Object.freeze({
-          workspace: Object.freeze({ id: workspace._id, name: workspace.name }),
+          workspace: Object.freeze({ id: workspace._id, name: workspace.name, role: membership.role }),
           user: Object.freeze(identity)
         })
       });

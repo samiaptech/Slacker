@@ -12,7 +12,8 @@ import {
   createOpenDirectMessageController,
   createSendDirectMessageController,
   createAuthorizeDirectMessageUploadController,
-  createDownloadDirectMessageAttachmentController
+  createDownloadDirectMessageAttachmentController,
+  createDeleteDirectMessageController
 } from "../controllers/index.js";
 import type { DirectMessageService } from "../services/index.js";
 import type { DirectMessageRealtimePublisher } from "../realtime/index.js";
@@ -22,7 +23,7 @@ type DirectWorkspaceAccessResult =
   | Readonly<{ kind: "unauthenticated" }>
   | Readonly<{ kind: "denied" }>
   | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string }> }> }>;
+  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string; role: "admin" | "member" }> }> }>;
 
 export type DirectMessageRouteDependencies = Readonly<{
   getIdentity: (headers: IncomingHttpHeaders) => Promise<DirectMessageIdentity | null>;
@@ -76,6 +77,10 @@ export const createDirectMessageRoutes = (dependencies: DirectMessageRouteDepend
     createAuthorizeDirectMessageUploadController(dependencies),
     parseMessageAttachments,
     createSendDirectMessageController(dependencies)
+  );
+  router.delete(
+    "/direct-messages/:conversationId/messages/:messageId",
+    createDeleteDirectMessageController(dependencies)
   );
   router.get(
     "/direct-messages/:conversationId/messages/:messageId/attachments/:attachmentId",

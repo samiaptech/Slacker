@@ -13,6 +13,8 @@ export type ApiErrorCode =
   | "channel_membership_conflict"
   | "direct_message_storage_unavailable"
   | "chat_attachment_storage_unavailable"
+  | "message_delete_forbidden"
+  | "message_delete_cleanup_failed"
   | "message_search_unavailable"
   | "rate_limited";
 

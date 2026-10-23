@@ -1,10 +1,20 @@
-import { encodeChannelMessageCursor, type ChannelMessage, type ChannelMessagePageQuery } from "../domain/index.js";
+import {
+  encodeChannelMessageCursor,
+  type ChannelMessage,
+  type ChannelMessageDeleteScope,
+  type ChannelMessagePageQuery
+} from "../domain/index.js";
 import type { ChannelMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 
 export type ChannelMessageStorageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageDocument[] }>
   | Readonly<{ kind: "channel-unavailable" }>;
+
+export type MessageDeleteResult =
+  | Readonly<{ kind: "deleted"; attachments: readonly ChatAttachmentRecord[] }>
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "forbidden" }>;
 
 export type ChannelMessageStorage = Readonly<{
   initialize: () => Promise<void>;
@@ -20,6 +30,14 @@ export type ChannelMessageStorage = Readonly<{
     userId: string,
     message: ChannelMessageDocument
   ) => Promise<"created" | "channel-unavailable">;
+  deleteForMember: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    scope: ChannelMessageDeleteScope,
+    isWorkspaceAdmin: boolean
+  ) => Promise<MessageDeleteResult>;
   findAttachmentForMember?: (
     workspaceId: string,
     channelId: string,
@@ -43,6 +61,7 @@ export type ChannelMessageRepository = Readonly<{
     userId: string,
     message: ChannelMessage
   ) => Promise<"created" | "channel-unavailable">;
+  deleteForMember: ChannelMessageStorage["deleteForMember"];
   findAttachmentForMember?: ChannelMessageStorage["findAttachmentForMember"];
 }>;
 
@@ -87,6 +106,7 @@ export const createChannelMessageRepository = (storage: ChannelMessageStorage): 
   },
   createForMember: (workspaceId, channelId, userId, message) =>
     storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message)),
+  deleteForMember: storage.deleteForMember,
   ...(storage.findAttachmentForMember
     ? { findAttachmentForMember: storage.findAttachmentForMember }
     : {})

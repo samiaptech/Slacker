@@ -161,6 +161,9 @@ void test("authorizes direct-message rooms and delivers only to conversation par
     charlie.once("direct-message:new", () => { leaked = true; });
     realtime.publishDirectMessage("workspace-1", "dm-1", message);
     assert.deepEqual(await received, message);
+    const deletion = new Promise((resolve) => bob.once("direct-message:deleted", resolve));
+    realtime.publishMessageDeleted("workspace-1", "dm-1", "message-1");
+    assert.deepEqual(await deletion, { conversationId: "dm-1", messageId: "message-1" });
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(leaked, false);
   } finally {

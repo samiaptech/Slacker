@@ -32,7 +32,7 @@ export type ChannelWorkspaceAccessResult =
   | Readonly<{ kind: "unauthenticated" }>
   | Readonly<{ kind: "denied" }>
   | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string; name: string }>; user: ChannelWorkspaceIdentity }> }>;
+  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string; name: string; role: "admin" | "member" }>; user: ChannelWorkspaceIdentity }> }>;
 export type ChannelMemberEmailVisibilityResult =
   | Readonly<{ kind: "unauthenticated" }>
   | Readonly<{ kind: "denied" }>

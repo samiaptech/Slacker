@@ -157,6 +157,10 @@ void test("authenticates sockets and scopes live channel events to workspace mem
     realtime.publishMessage("workspace-1", "channel-1", message);
     assert.deepEqual(await receivedMessage, message);
 
+    const receivedDeletion = new Promise((resolve) => bob.once("channel:message:deleted", resolve));
+    realtime.publishMessageDeleted("workspace-1", "channel-1", "message-1");
+    assert.deepEqual(await receivedDeletion, { channelId: "channel-1", messageId: "message-1" });
+
     const changedMembers = new Promise((resolve) => bob.once("channel:members:changed", resolve));
     realtime.publishMembersChanged("workspace-1", "channel-1");
     assert.deepEqual(await changedMembers, { channelId: "channel-1" });

@@ -44,6 +44,22 @@ The initializer also installs `direct_messages_text` for permission-aware
 workspace message search. Run it after deployment before enabling search; the
 search API fails explicitly while either channel or DM text index is missing.
 
+`DELETE /direct-messages/:conversationId/messages/:messageId` accepts strict
+JSON `{ "scope": "me" | "everyone" }` and returns `204 No Content`. Any current
+participant can use `me`; the hide persists for that user and filters their
+history, message-search results, and attachment downloads without affecting
+other participants. `everyone` is allowed to the author or a workspace
+administrator, but the requester must still be a participant in that
+conversation. Global deletion removes the message and its private Cloudinary
+assets and emits `direct-message:deleted` with
+`{ "conversationId": "...", "messageId": "..." }` to that conversation room.
+Attachment cleanup failure returns `message_delete_cleanup_failed` rather than
+success; the error states that the database deletion has already committed, and
+the global deletion event is still emitted. Personal hides do not emit a realtime
+event; the requesting client removes the message locally and later history
+loads remain filtered. Run `direct-messages:initialize` after deploying the
+updated strict message validator.
+
 ## Live delivery
 
 Socket.IO authenticates with the same session as channel chat. A client must

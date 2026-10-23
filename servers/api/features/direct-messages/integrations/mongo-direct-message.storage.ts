@@ -178,12 +178,13 @@ export const createMongoDirectMessageStorage = (
           ? {
             workspaceId,
             conversationId,
+            hiddenForUserIds: { $nin: [userId] },
             $or: [
               { createdAt: { $lt: query.before.createdAt } },
               { createdAt: query.before.createdAt, _id: { $lt: query.before.id } }
             ]
           }
-          : { workspaceId, conversationId };
+          : { workspaceId, conversationId, hiddenForUserIds: { $nin: [userId] } };
         const page = await messages.find(filter, { session })
           .sort({ createdAt: -1, _id: -1 })
           .limit(query.pageSize + 1)
@@ -224,13 +225,54 @@ export const createMongoDirectMessageStorage = (
         const message = await messages.findOne({
           _id: messageId,
           workspaceId,
-          conversationId
+          conversationId,
+          hiddenForUserIds: { $nin: [userId] }
         }, { session });
         return message?.attachments?.find(({ id }) => id === attachmentId) ?? null;
       }).catch((error: unknown) => {
         if (isUnsupportedTransaction(error)) throw storageUnavailable;
         throw error;
       });
+    },
+    deleteMessageForMember: async (workspaceId, conversationId, userId, messageId, scope, isWorkspaceAdmin) => {
+      await ensureReady();
+      try {
+        return await withTransaction(async (session) => {
+          const conversation = await conversations.findOne({
+            _id: conversationId,
+            workspaceId,
+            participantIds: userId
+          }, { session });
+          if (!conversation) return Object.freeze({ kind: "not-found" as const });
+          const message = await messages.findOne({
+            _id: messageId,
+            workspaceId,
+            conversationId
+          }, { session });
+          if (!message) return Object.freeze({ kind: "not-found" as const });
+          if (scope === "me") {
+            const hidden = await messages.updateOne(
+              { _id: messageId, workspaceId, conversationId },
+              { $addToSet: { hiddenForUserIds: userId } },
+              { session }
+            );
+            if (hidden.matchedCount === 0) return Object.freeze({ kind: "not-found" as const });
+            return Object.freeze({ kind: "deleted" as const, attachments: Object.freeze([]) });
+          }
+          if (message.senderId !== userId && !isWorkspaceAdmin) {
+            return Object.freeze({ kind: "forbidden" as const });
+          }
+          const deleted = await messages.deleteOne({ _id: messageId, workspaceId, conversationId }, { session });
+          if (deleted.deletedCount === 0) return Object.freeze({ kind: "not-found" as const });
+          return Object.freeze({
+            kind: "deleted" as const,
+            attachments: Object.freeze([...(message.attachments ?? [])])
+          });
+        });
+      } catch (error: unknown) {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      }
     }
   });
 };

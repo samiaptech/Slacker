@@ -26,9 +26,10 @@ type DirectWorkspaceAccessResult =
   | Readonly<{ kind: "unauthenticated" }>
   | Readonly<{ kind: "denied" }>
   | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string }> }> }>;
+  | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string; role: "admin" | "member" }> }> }>;
 type DirectMessageRealtime = Readonly<{
   publishDirectMessage: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
+  publishMessageDeleted: (workspaceId: string, conversationId: string, messageId: string) => void;
   publishConversationChanged: (workspaceId: string) => void;
 }>;
 type ControllerDependencies = Readonly<{
@@ -47,6 +48,7 @@ type RequestAccessResult =
     kind: "allowed";
     workspaceId: string;
     userId: string;
+    workspaceRole: "admin" | "member";
     senderProfile: Readonly<{ name: string; image: string | null }>;
   }>
   | Readonly<{ kind: "unauthenticated" | "denied" | "unavailable" }>;
@@ -56,6 +58,7 @@ const messageBodySchema = z.object({
   text: z.string().default("")
     .refine((text) => Array.from(text).length <= DIRECT_MESSAGE_MAX_LENGTH)
 }).strict();
+const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(DIRECT_MESSAGE_PAGE_SIZE_MAX)
     .default(DIRECT_MESSAGE_PAGE_SIZE_DEFAULT),
@@ -80,6 +83,7 @@ const resolveAccess = async (
     kind: "allowed",
     workspaceId: result.access.workspace.id,
     userId: identity.id,
+    workspaceRole: result.access.workspace.role,
     senderProfile: Object.freeze({ name: identity.name, image: identity.image })
   });
 };
@@ -307,6 +311,72 @@ export const createListDirectMessageHistoryController = (
       nextCursor: result.nextCursor
     };
     response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createDeleteDirectMessageController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendAccessError(access.kind, next);
+      return;
+    }
+    const { conversationId, messageId } = request.params;
+    if (typeof conversationId !== "string" || typeof messageId !== "string" || !conversationId || !messageId) {
+      sendNotFound(next);
+      return;
+    }
+    const parsed = deleteBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "scope", reason: "must_be_me_or_everyone" }
+      }));
+      return;
+    }
+    const result = await service.deleteMessage(
+      access.workspaceId,
+      conversationId,
+      access.userId,
+      messageId,
+      parsed.data.scope,
+      access.workspaceRole === "admin"
+    );
+    if (result.kind === "unavailable") {
+      sendUnavailable(next);
+      return;
+    }
+    if (result.kind === "not-found") {
+      sendNotFound(next);
+      return;
+    }
+    if (result.kind === "forbidden") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageDeleteForbidden,
+        message: ERROR_MESSAGES.messageDeleteForbidden,
+        status: HTTP_STATUS.forbidden
+      }));
+      return;
+    }
+    if (parsed.data.scope === "everyone") {
+      realtime?.publishMessageDeleted(access.workspaceId, conversationId, messageId);
+    }
+    if (result.kind === "attachment-cleanup-failed") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageDeleteCleanupFailed,
+        message: ERROR_MESSAGES.messageDeleteCleanupFailed,
+        status: HTTP_STATUS.serviceUnavailable
+      }));
+      return;
+    }
+    response.status(HTTP_STATUS.noContent).end();
   } catch (error: unknown) {
     next(error);
   }

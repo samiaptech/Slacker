@@ -356,3 +356,13 @@ Updated: 2026-10-23.
   The adapter fix was committed as `3f36bbf` and pushed to `origin/main`; production
   deployment and multi-client verification remain pending. Presence still uses
   process-local tracking.
+
+- **Message deletion:** Channel and DM messages now support persistent “Delete for me”
+  for current members/participants and “Delete for everyone” for the author or a workspace
+  admin. Global deletion removes private attachment assets and broadcasts a typed realtime
+  event; personal hides are filtered from history, search, and downloads. API tests passed
+  (141 passed, 2 optional MongoDB replica-set tests skipped); API build/typecheck/lint,
+  shared types typecheck, web tests (21), web typecheck/lint/build, repository check, and
+  `git diff --check` passed. No live DB migration or production-browser check was run.
+  Work remains uncommitted on `slacker`. After deployment, run `channels:initialize` and
+  `direct-messages:initialize`; then verify both deletion scopes from two clients.

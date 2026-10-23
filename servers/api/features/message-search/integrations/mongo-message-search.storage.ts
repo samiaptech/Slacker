@@ -115,7 +115,8 @@ export const createMongoMessageSearchStorage = (database: MongoDatabase): Messag
             ? Promise.resolve([])
             : channelMessages.find<IndexedSearchMessage>({
               $text: { $search: query },
-              channelId: { $in: channelIds }
+              channelId: { $in: channelIds },
+              hiddenForUserIds: { $nin: [userId] }
             }, {
               projection: {
                 _id: 1, channelId: 1, senderId: 1, text: 1, createdAt: 1,
@@ -128,7 +129,8 @@ export const createMongoMessageSearchStorage = (database: MongoDatabase): Messag
             : directMessages.find<IndexedSearchMessage>({
               $text: { $search: query },
               workspaceId,
-              conversationId: { $in: [...conversationParticipants.keys()] }
+              conversationId: { $in: [...conversationParticipants.keys()] },
+              hiddenForUserIds: { $nin: [userId] }
             }, {
               projection: {
                 _id: 1, conversationId: 1, senderId: 1, text: 1, createdAt: 1,

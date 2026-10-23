@@ -1,9 +1,20 @@
-import { encodeDirectMessageCursor, type DirectConversation, type DirectMessage, type DirectMessagePageQuery } from "../domain/index.js";
+import {
+  encodeDirectMessageCursor,
+  type DirectConversation,
+  type DirectMessage,
+  type DirectMessageDeleteScope,
+  type DirectMessagePageQuery
+} from "../domain/index.js";
 import type { DirectConversationDocument, DirectMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 
 export type DirectMessageOpenStorageResult =
   Readonly<{ kind: "opened"; conversation: DirectConversationDocument; created: boolean }>;
+
+export type DirectMessageDeleteResult =
+  | Readonly<{ kind: "deleted"; attachments: readonly ChatAttachmentRecord[] }>
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "forbidden" }>;
 
 export type DirectMessageStorage = Readonly<{
   initialize: () => Promise<void>;
@@ -32,6 +43,14 @@ export type DirectMessageStorage = Readonly<{
     userId: string,
     message: DirectMessageDocument
   ) => Promise<boolean>;
+  deleteMessageForMember: (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    scope: DirectMessageDeleteScope,
+    isWorkspaceAdmin: boolean
+  ) => Promise<DirectMessageDeleteResult>;
   findAttachmentForMember?: (
     workspaceId: string,
     conversationId: string,
@@ -131,6 +150,7 @@ export const createDirectMessageRepository = (storage: DirectMessageStorage) => 
     userId,
     toMessageDocument(message)
   ),
+  deleteMessageForMember: storage.deleteMessageForMember,
   ...(storage.findAttachmentForMember
     ? { findAttachmentForMember: storage.findAttachmentForMember }
     : {})

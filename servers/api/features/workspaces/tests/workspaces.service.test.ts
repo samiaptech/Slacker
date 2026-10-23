@@ -36,7 +36,7 @@ void test("creates separate workspaces and grants creator administrator membersh
   assert.deepEqual(await service.listForUser(owner.id), { kind: "listed", workspaces: [first] });
   assert.deepEqual(await service.getAccess(owner, first.id), {
     kind: "allowed",
-    access: { workspace: { id: first.id, name: first.name }, user: owner }
+    access: { workspace: { id: first.id, name: first.name, role: "admin" }, user: owner }
   });
   assert.deepEqual(await service.getAccess(invitedUser, first.id), { kind: "denied" });
 });

@@ -50,6 +50,7 @@ export type {
   ChannelMessage,
   ChannelMessageCursor,
   ChannelMessageCursorDecodeResult,
+  ChannelMessageDeleteScope,
   ChannelMessagePageQuery,
   ChannelMessageTextResult
 } from "./channel-messages.js";

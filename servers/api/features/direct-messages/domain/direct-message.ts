@@ -24,6 +24,8 @@ export type DirectMessage = Readonly<{
   attachments?: readonly ChatAttachmentRecord[];
 }>;
 
+export type DirectMessageDeleteScope = "me" | "everyone";
+
 export type DirectMessageCursor = Readonly<{ createdAt: Date; id: string }>;
 export type DirectMessagePageQuery = Readonly<{
   pageSize: number;

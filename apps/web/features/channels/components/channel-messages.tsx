@@ -14,7 +14,9 @@ import { ChannelMessageItem } from "./channel-message-item";
 import {
   captureHistoryScrollAnchor,
   restoreHistoryScrollAnchor,
-  type HistoryScrollAnchor
+  getMessageDeleteFailure,
+  type HistoryScrollAnchor,
+  type MessageDeleteScope
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -47,7 +49,7 @@ const formatFileSize = (size: number): string => size < 1024 * 1024
   : `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
 export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDescription, canSend }: ChannelMessagesProps): ReactElement => {
-  const { activeWorkspace } = useWorkspaceContext();
+  const { activeWorkspace, currentUser } = useWorkspaceContext();
   const realtime = useChannelRealtime();
   const [messages, setMessages] = useState<readonly ChannelMessageView[]>([]);
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
@@ -56,7 +58,9 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const [selectedFiles, setSelectedFiles] = useState<readonly File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentActionError, setAttachmentActionError] = useState<string | null>(null);
+  const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -164,6 +168,10 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       shouldScrollToBottom.current = true;
       setMessages((current) => mergeMessages(current, [message]));
     };
+    const onMessageDeleted = (change: Readonly<{ channelId: string; messageId: string }>): void => {
+      if (change.channelId !== channelId) return;
+      setMessages((current) => current.filter((message) => message.id !== change.messageId));
+    };
     const onAccessRevoked = (change: Readonly<{ workspaceId: string; channelId: string }>): void => {
       if (change.workspaceId !== activeWorkspace.id || change.channelId !== channelId) return;
       revokeAccess();
@@ -192,6 +200,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     };
     socket.on("channel:ready", onChannelReady);
     socket.on("channel:message:new", onMessage);
+    socket.on("channel:message:deleted", onMessageDeleted);
     socket.on("channel:access:revoked", onAccessRevoked);
     socket.on("workspace:access:revoked", onWorkspaceAccessRevoked);
     socket.on("channel:typing", onTyping);
@@ -199,6 +208,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     return () => {
       socket.off("channel:ready", onChannelReady);
       socket.off("channel:message:new", onMessage);
+      socket.off("channel:message:deleted", onMessageDeleted);
       socket.off("channel:access:revoked", onAccessRevoked);
       socket.off("workspace:access:revoked", onWorkspaceAccessRevoked);
       socket.off("channel:typing", onTyping);
@@ -360,6 +370,40 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     }
   }, [activeWorkspace.id, apiBaseUrl, downloadingAttachmentId]);
 
+  const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
+    if (deletingMessageId) return;
+    setDeletingMessageId(messageId);
+    setMessageActionError(null);
+    try {
+      const response = await fetch(new URL(
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+        apiBaseUrl
+      ), {
+        method: "DELETE",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Workspace-Id": activeWorkspace.id
+        },
+        body: JSON.stringify({ scope })
+      });
+      if (!response.ok) {
+        const failure = await getMessageDeleteFailure(response);
+        if (failure.deletionCommitted) {
+          setMessages((current) => current.filter((message) => message.id !== messageId));
+        }
+        setMessageActionError(failure.message);
+        return;
+      }
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+    } catch (error: unknown) {
+      setMessageActionError(error instanceof Error ? error.message : "The message could not be deleted.");
+    } finally {
+      setDeletingMessageId(null);
+    }
+  };
+
   const searchJump = useMessageSearchJump({
     type: "channel",
     conversationId: channelId,
@@ -428,6 +472,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
           </div>
         </div>
       ) : null}
+      {messageActionError ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError}</p> : null}
 
       <div aria-live="polite" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-2 sm:px-8 sm:py-2" ref={scrollContainerRef}>
         {isLoading ? (
@@ -460,8 +505,11 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                     key={message.id}
                     downloadingAttachmentId={downloadingAttachmentId}
                     isDownloadBusy={downloadingAttachmentId !== null}
+                    canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
+                    isDeleting={deletingMessageId !== null}
                     message={message}
                     onDownloadAttachment={downloadAttachment}
+                    onDelete={(scope) => { void deleteMessage(message.id, scope); }}
                     startsNewDay={startsNewDay}
                   />
                 ))}

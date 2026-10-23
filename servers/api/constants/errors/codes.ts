@@ -15,6 +15,8 @@ export const ERROR_CODES = Object.freeze({
   channelMembershipConflict: "channel_membership_conflict",
   directMessageStorageUnavailable: "direct_message_storage_unavailable",
   chatAttachmentStorageUnavailable: "chat_attachment_storage_unavailable",
+  messageDeleteForbidden: "message_delete_forbidden",
+  messageDeleteCleanupFailed: "message_delete_cleanup_failed",
   messageSearchUnavailable: "message_search_unavailable",
   rateLimited: "rate_limited"
 } as const satisfies Readonly<Record<string, ApiErrorCode>>);

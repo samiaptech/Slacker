@@ -129,12 +129,13 @@ export const createMongoChannelMessageStorage = (
         const filter = query.before
           ? {
             channelId,
+            hiddenForUserIds: { $nin: [userId] },
             $or: [
               { createdAt: { $lt: query.before.createdAt } },
               { createdAt: query.before.createdAt, _id: { $lt: query.before.id } }
             ]
           }
-          : { channelId };
+          : { channelId, hiddenForUserIds: { $nin: [userId] } };
         const page = await messages.find(filter, { session })
           .sort({ createdAt: -1, _id: -1 })
           .limit(query.pageSize + 1)
@@ -148,7 +149,11 @@ export const createMongoChannelMessageStorage = (
         const channel = await channels.findOne({ _id: channelId, workspaceId }, { session });
         const membership = await memberships.findOne({ channelId, userId }, { session });
         if (!channel || !membership) return null;
-        const message = await messages.findOne({ _id: messageId, channelId }, { session });
+        const message = await messages.findOne({
+          _id: messageId,
+          channelId,
+          hiddenForUserIds: { $nin: [userId] }
+        }, { session });
         return message?.attachments?.find(({ id }) => id === attachmentId) ?? null;
       });
     },
@@ -165,6 +170,40 @@ export const createMongoChannelMessageStorage = (
         if (locked.matchedCount === 0) return "channel-unavailable";
         await messages.insertOne(message, { session });
         return "created";
+      });
+    },
+    deleteForMember: async (workspaceId, channelId, userId, messageId, scope, isWorkspaceAdmin) => {
+      await ensureReady();
+      return runTransaction(async (session) => {
+        const channel = await channels.findOne({ _id: channelId, workspaceId }, { session });
+        const membership = await memberships.findOne({ channelId, userId }, { session });
+        if (!channel || !membership) return Object.freeze({ kind: "not-found" as const });
+        const message = await messages.findOne({ _id: messageId, channelId }, { session });
+        if (!message) return Object.freeze({ kind: "not-found" as const });
+        if (scope === "everyone" && message.senderId !== userId && !isWorkspaceAdmin) {
+          return Object.freeze({ kind: "forbidden" as const });
+        }
+        const locked = await channels.updateOne(
+          { _id: channelId, workspaceId },
+          { $inc: { membershipRevision: 1 } },
+          { session }
+        );
+        if (locked.matchedCount === 0) return Object.freeze({ kind: "not-found" as const });
+        if (scope === "me") {
+          const hidden = await messages.updateOne(
+            { _id: messageId, channelId },
+            { $addToSet: { hiddenForUserIds: userId } },
+            { session }
+          );
+          if (hidden.matchedCount === 0) return Object.freeze({ kind: "not-found" as const });
+          return Object.freeze({ kind: "deleted" as const, attachments: Object.freeze([]) });
+        }
+        const deleted = await messages.deleteOne({ _id: messageId, channelId }, { session });
+        if (deleted.deletedCount === 0) return Object.freeze({ kind: "not-found" as const });
+        return Object.freeze({
+          kind: "deleted" as const,
+          attachments: Object.freeze([...(message.attachments ?? [])])
+        });
       });
     }
   });

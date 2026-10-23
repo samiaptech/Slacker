@@ -24,6 +24,7 @@ export type ChannelMessageDocument = Readonly<{
   text: string;
   createdAt: Date;
   attachments?: readonly ChatAttachmentRecord[];
+  hiddenForUserIds?: readonly string[];
 }>;
 
 /** MongoDB collection validation keeps persisted channel documents aligned with the domain contract. */
@@ -115,6 +116,11 @@ export const CHANNEL_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
       senderId: Object.freeze({ bsonType: "string", minLength: 1 }),
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
+      hiddenForUserIds: Object.freeze({
+        bsonType: "array",
+        uniqueItems: true,
+        items: Object.freeze({ bsonType: "string", minLength: 1 })
+      }),
       attachments: Object.freeze({
         bsonType: "array",
         maxItems: 5,

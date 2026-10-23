@@ -1,6 +1,7 @@
 import {
   CHANNEL_MESSAGE_MAX_LENGTH,
   type ChannelMessage,
+  type ChannelMessageDeleteScope,
   type ChannelMessagePageQuery
 } from "../domain/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
@@ -25,6 +26,11 @@ export type ChannelMessagePageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageWithSender[]; nextCursor: string | null }>
   | Readonly<{ kind: "channel-unavailable" }>
   | Readonly<{ kind: "unavailable" }>;
+
+export type DeleteChannelMessageResult =
+  | Readonly<{ kind: "deleted" }>
+  | Readonly<{ kind: "attachment-cleanup-failed" }>
+  | Readonly<{ kind: "not-found" | "forbidden" | "unavailable" }>;
 
 export type SendChannelMessageResult =
   | Readonly<{ kind: "sent"; message: ChannelMessageWithSender }>
@@ -188,6 +194,36 @@ export const createChannelMessageService = ({
       return attachment
         ? Object.freeze({ kind: "found", attachment })
         : Object.freeze({ kind: "not-found" });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  delete: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    scope: ChannelMessageDeleteScope,
+    isWorkspaceAdmin: boolean
+  ): Promise<DeleteChannelMessageResult> => {
+    try {
+      const result = await repository.deleteForMember(
+        workspaceId,
+        channelId,
+        userId,
+        messageId,
+        scope,
+        isWorkspaceAdmin
+      );
+      if (result.kind !== "deleted") return result;
+      if (scope === "me" || result.attachments.length === 0) return Object.freeze({ kind: "deleted" });
+      if (!attachmentStorage) return Object.freeze({ kind: "attachment-cleanup-failed" });
+      const cleanup = await Promise.allSettled(result.attachments.map(async (attachment) =>
+        attachmentStorage.delete(attachment)));
+      return cleanup.some(({ status }) => status === "rejected")
+        ? Object.freeze({ kind: "attachment-cleanup-failed" })
+        : Object.freeze({ kind: "deleted" });
     } catch (error: unknown) {
       if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
       throw error;

@@ -74,7 +74,8 @@ const startApi = async (
   messageService: ChannelMessageService = {
     list: () => Promise.resolve({ kind: "channel-unavailable" }),
     send: () => Promise.resolve({ kind: "channel-unavailable" }),
-    getAttachment: () => Promise.resolve({ kind: "not-found" })
+    getAttachment: () => Promise.resolve({ kind: "not-found" }),
+    delete: () => Promise.resolve({ kind: "not-found" })
   },
   attachmentStorage?: ChatAttachmentIntegration
 ) => {
@@ -533,7 +534,8 @@ void test("lists and sends channel messages with current workspace authorization
           : { kind: "channel-unavailable" as const }
       );
     },
-    getAttachment: () => Promise.resolve({ kind: "not-found" })
+    getAttachment: () => Promise.resolve({ kind: "not-found" }),
+    delete: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -589,7 +591,8 @@ void test("lists and sends channel messages with current workspace authorization
         userId === memberIdentity.id
           ? { kind: "found" as const, attachment }
           : { kind: "not-found" as const }
-      )
+      ),
+      delete: () => Promise.resolve({ kind: "not-found" })
     };
     const attachmentStorage: ChatAttachmentIntegration = {
       upload: () => Promise.resolve(attachment),
@@ -689,4 +692,67 @@ void test("lists and sends channel messages with current workspace authorization
     headers: { ...workspaceHeaders, "x-test-identity": "outside" }
   });
   assert.equal(unavailable.status, 403);
+});
+
+void test("exposes the message deletion contract and derives admin override from workspace access", async (context) => {
+  const calls: unknown[][] = [];
+  const messageService: ChannelMessageService = {
+    list: () => Promise.resolve({ kind: "channel-unavailable" }),
+    send: () => Promise.resolve({ kind: "channel-unavailable" }),
+    getAttachment: () => Promise.resolve({ kind: "not-found" }),
+    delete: (...args) => {
+      calls.push(args);
+      if (args[3] === "message-cleanup") {
+        return Promise.resolve({ kind: "attachment-cleanup-failed" });
+      }
+      return Promise.resolve(args[5] ? { kind: "deleted" } : { kind: "forbidden" });
+    }
+  };
+  const { server, url } = await startApi(
+    createTestChannel,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    messageService
+  );
+  context.after(async () => server.stop());
+  const endpoint = `${url}/channel-1/messages/message-1`;
+  const request = (identity: string) => fetch(endpoint, {
+    method: "DELETE",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": identity
+    },
+    body: JSON.stringify({ scope: "everyone" })
+  });
+
+  const adminDelete = await request("member");
+  assert.equal(adminDelete.status, 204);
+  assert.equal(adminDelete.headers.get("cache-control"), "no-store");
+  assert.deepEqual(calls[0], [
+    "workspace-configured", "channel-1", memberIdentity.id, "message-1", "everyone", true
+  ]);
+
+  const memberDelete = await request("other-member");
+  assert.equal(memberDelete.status, 403);
+  assert.deepEqual(calls[1], [
+    "workspace-configured", "channel-1", otherMemberIdentity.id, "message-1", "everyone", false
+  ]);
+  const cleanupFailure = await fetch(`${url}/channel-1/messages/message-cleanup`, {
+    method: "DELETE",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": "member"
+    },
+    body: JSON.stringify({ scope: "everyone" })
+  });
+  assert.equal(cleanupFailure.status, 503);
+  assert.equal((await cleanupFailure.json() as { error: { code: string } }).error.code, "message_delete_cleanup_failed");
 });

@@ -45,9 +45,10 @@ const createMemoryStorage = (): DirectMessageStorage => {
       const before = query.before;
       const eligible = before
         ? matchingMessages.filter((message) =>
-          message.createdAt < before.createdAt
-          || (message.createdAt.getTime() === before.createdAt.getTime() && message._id < before.id))
-        : matchingMessages;
+          !message.hiddenForUserIds?.includes(userId)
+          && (message.createdAt < before.createdAt
+            || (message.createdAt.getTime() === before.createdAt.getTime() && message._id < before.id)))
+        : matchingMessages.filter((message) => !message.hiddenForUserIds?.includes(userId));
       const newestFirst = [...eligible].sort((left, right) =>
         right.createdAt.getTime() - left.createdAt.getTime() || right._id.localeCompare(left._id));
       return Promise.resolve(newestFirst.slice(0, query.pageSize + 1));
@@ -58,6 +59,28 @@ const createMemoryStorage = (): DirectMessageStorage => {
       if (!conversation) return Promise.resolve(false);
       messages.get(conversationId)?.push(message);
       return Promise.resolve(true);
+    },
+    deleteMessageForMember: (workspaceId, conversationId, userId, messageId, scope, isWorkspaceAdmin) => {
+      const conversation = [...conversations.values()].find((entry) =>
+        entry.workspaceId === workspaceId && entry._id === conversationId && entry.participantIds.includes(userId));
+      if (!conversation) return Promise.resolve({ kind: "not-found" });
+      const conversationMessages = messages.get(conversationId) ?? [];
+      const index = conversationMessages.findIndex((message) => message._id === messageId
+        && message.workspaceId === workspaceId && message.conversationId === conversationId);
+      const message = conversationMessages[index];
+      if (!message) return Promise.resolve({ kind: "not-found" });
+      if (scope === "everyone" && message.senderId !== userId && !isWorkspaceAdmin) {
+        return Promise.resolve({ kind: "forbidden" });
+      }
+      if (scope === "me") {
+        conversationMessages[index] = {
+          ...message,
+          hiddenForUserIds: [...new Set([...(message.hiddenForUserIds ?? []), userId])]
+        };
+        return Promise.resolve({ kind: "deleted", attachments: [] });
+      }
+      conversationMessages.splice(index, 1);
+      return Promise.resolve({ kind: "deleted", attachments: message.attachments ?? [] });
     }
   });
 };
@@ -184,6 +207,55 @@ void test("stores messages only for participants and rejects blank text", async 
   });
   assert.equal(history.kind, "listed");
   assert.equal(history.messages[0]?.text, "Hello privately");
+});
+
+void test("persists per-user hides and permits author or workspace-admin global deletion", async () => {
+  const storage = createMemoryStorage();
+  const service = createService(storage);
+  const opened = await service.open("workspace-1", "alice", "bob");
+  assert.equal(opened.kind, "opened");
+  const sent = await service.send("workspace-1", opened.conversation.id, "alice", "Keep private");
+  assert.equal(sent.kind, "sent");
+
+  assert.deepEqual(await service.deleteMessage(
+    "workspace-1", opened.conversation.id, "bob", sent.message.id, "me", false
+  ), { kind: "deleted" });
+  const bobHistory = await service.listMessages("workspace-1", opened.conversation.id, "bob", {
+    pageSize: 50, before: null
+  });
+
+  const aliceHistory = await service.listMessages("workspace-1", opened.conversation.id, "alice", {
+    pageSize: 50, before: null
+  });
+  assert.equal("messages" in bobHistory ? bobHistory.messages.length : -1, 0);
+  assert.equal("messages" in aliceHistory ? aliceHistory.messages.length : -1, 1);
+  assert.deepEqual(await service.deleteMessage(
+    "workspace-1", opened.conversation.id, "outsider", sent.message.id, "everyone", true
+  ), { kind: "not-found" });
+  assert.deepEqual(await service.deleteMessage(
+    "workspace-1", opened.conversation.id, "bob", sent.message.id, "everyone", false
+  ), { kind: "forbidden" });
+  assert.deepEqual(await service.deleteMessage(
+    "workspace-1", opened.conversation.id, "bob", sent.message.id, "everyone", true
+  ), { kind: "deleted" });
+  const finalHistory = await service.listMessages("workspace-1", opened.conversation.id, "alice", {
+    pageSize: 50, before: null
+  });
+  assert.equal("messages" in finalHistory ? finalHistory.messages.length : -1, 0);
+});
+
+void test("does not report success when DM deletion persistence fails", async () => {
+  const storageError = Object.assign(new Error("database unavailable"), {
+    kind: "direct-message-storage-unavailable" as const
+  });
+  const storage: DirectMessageStorage = {
+    ...createMemoryStorage(),
+    deleteMessageForMember: () => Promise.reject(storageError)
+  };
+  const service = createService(storage);
+  assert.deepEqual(await service.deleteMessage(
+    "workspace-1", "conversation-1", "alice", "message-1", "everyone", true
+  ), { kind: "unavailable" });
 });
 
 void test("uses the authenticated sender profile without a post-persistence profile query", async () => {

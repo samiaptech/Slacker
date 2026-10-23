@@ -1,5 +1,6 @@
 export {
   createAuthorizeDirectMessageUploadController,
+  createDeleteDirectMessageController,
   createGetDirectMessageController,
   createListDirectMessageHistoryController,
   createListDirectMessagesController,

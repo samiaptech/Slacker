@@ -15,8 +15,10 @@ import { DirectMessageItem } from "./direct-message-item";
 import { DirectMessageLoading } from "./direct-message-loading";
 import {
   captureHistoryScrollAnchor,
+  getMessageDeleteFailure,
   restoreHistoryScrollAnchor,
-  type HistoryScrollAnchor
+  type HistoryScrollAnchor,
+  type MessageDeleteScope
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -54,7 +56,9 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
   const [selectedFiles, setSelectedFiles] = useState<readonly File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentActionError, setAttachmentActionError] = useState<string | null>(null);
+  const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -150,6 +154,10 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       shouldScrollRef.current = true;
       setMessages((current) => mergeMessages(current, [message]));
     };
+    const onMessageDeleted = (change: Readonly<{ conversationId: string; messageId: string }>): void => {
+      if (change.conversationId !== conversationId) return;
+      setMessages((current) => current.filter((message) => message.id !== change.messageId));
+    };
     const onTyping = (payload: Readonly<{ conversationId: string; userId: string; active: boolean }>): void => {
       if (payload.conversationId !== conversationId || payload.userId === currentUser.id) return;
       if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
@@ -170,12 +178,14 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     };
     socket.on("direct-message:ready", onReady);
     socket.on("direct-message:new", onMessage);
+    socket.on("direct-message:deleted", onMessageDeleted);
     socket.on("direct-message:typing", onTyping);
     socket.on("workspace:access:revoked", onWorkspaceAccessRevoked);
     if (socket.connected && realtime.workspaceReady) subscribe();
     return () => {
       socket.off("direct-message:ready", onReady);
       socket.off("direct-message:new", onMessage);
+      socket.off("direct-message:deleted", onMessageDeleted);
       socket.off("direct-message:typing", onTyping);
       socket.off("workspace:access:revoked", onWorkspaceAccessRevoked);
       if (socket.connected && realtime.workspaceReady) socket.emit("direct-message:unsubscribe", conversationId);
@@ -306,6 +316,40 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     }
   }, [activeWorkspace.id, apiBaseUrl, downloadingAttachmentId]);
 
+  const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
+    if (deletingMessageId) return;
+    setDeletingMessageId(messageId);
+    setMessageActionError(null);
+    try {
+      const response = await fetch(new URL(
+        `/direct-messages/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+        apiBaseUrl
+      ), {
+        method: "DELETE",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Workspace-Id": activeWorkspace.id
+        },
+        body: JSON.stringify({ scope })
+      });
+      if (!response.ok) {
+        const failure = await getMessageDeleteFailure(response);
+        if (failure.deletionCommitted) {
+          setMessages((current) => current.filter((message) => message.id !== messageId));
+        }
+        setMessageActionError(failure.message);
+        return;
+      }
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+    } catch (error: unknown) {
+      setMessageActionError(error instanceof Error ? error.message : "The message could not be deleted.");
+    } finally {
+      setDeletingMessageId(null);
+    }
+  };
+
   const loadOlder = useCallback(async (): Promise<void> => {
     if (!nextCursor || isLoadingOlder) return;
     setIsLoadingOlder(true);
@@ -375,6 +419,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                 {realtime.status === "connected" ? "Live updates" : "Reconnecting to live chat…"}
               </p>
             </header>
+            {messageActionError ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError}</p> : null}
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-2 sm:px-8" ref={scrollContainerRef}>
               {nextCursor ? (
                 <div className="mb-3 text-center">
@@ -393,8 +438,11 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                       key={message.id}
                       downloadingAttachmentId={downloadingAttachmentId}
                       isDownloadBusy={downloadingAttachmentId !== null}
+                      canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
+                      isDeleting={deletingMessageId !== null}
                       message={message}
                       onDownloadAttachment={downloadAttachment}
+                      onDelete={(scope) => { void deleteMessage(message.id, scope); }}
                       startsNewDay={startsNewDay}
                     />
                   ))}

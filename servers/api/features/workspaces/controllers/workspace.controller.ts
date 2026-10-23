@@ -474,7 +474,10 @@ export const createWorkspaceAccessController = ({ getIdentity, service }: Worksp
         return;
       }
       response.status(HTTP_STATUS.ok).json({
-        ...result.access,
+        workspace: {
+          id: result.access.workspace.id,
+          name: result.access.workspace.name
+        },
         user: { ...result.access.user, title: result.access.user.title ?? null }
       });
     } catch (error: unknown) {

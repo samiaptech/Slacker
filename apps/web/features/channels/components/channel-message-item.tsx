@@ -2,6 +2,7 @@ import { memo, type ReactElement } from "react";
 import Image from "next/image";
 import { Download, FileText } from "lucide-react";
 import { Button } from "@workspace/ui";
+import { MessageActions, type MessageDeleteScope } from "@/features/conversation-history/public";
 import type { ChannelMessageView } from "../types";
 
 type ChannelMessageAttachment = NonNullable<ChannelMessageView["attachments"]>[number];
@@ -11,7 +12,10 @@ type ChannelMessageItemProps = Readonly<{
   startsNewDay: boolean;
   isDownloadBusy: boolean;
   downloadingAttachmentId: string | null;
+  canDeleteForEveryone: boolean;
+  isDeleting: boolean;
   onDownloadAttachment: (attachment: ChannelMessageAttachment) => void;
+  onDelete: (scope: MessageDeleteScope) => void;
 }>;
 
 const formatMessageTime = (value: string): string =>
@@ -32,7 +36,10 @@ const ChannelMessageItemView = ({
   startsNewDay,
   isDownloadBusy,
   downloadingAttachmentId,
-  onDownloadAttachment
+  onDownloadAttachment,
+  canDeleteForEveryone,
+  isDeleting,
+  onDelete
 }: ChannelMessageItemProps): ReactElement => (
   <>
     {startsNewDay ? (
@@ -42,7 +49,7 @@ const ChannelMessageItemView = ({
         <span aria-hidden="true" className="h-px flex-1 bg-[#e7e9e4]" />
       </li>
     ) : null}
-    <li className="flex items-start gap-3" data-message-id={message.id}>
+    <li className="group flex items-start gap-3" data-message-id={message.id}>
       <div aria-hidden="true" className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-xs font-semibold text-primary">
         {message.sender.image
           ? <Image alt="" className="object-cover" height={36} src={message.sender.image} unoptimized width={36} />
@@ -52,6 +59,11 @@ const ChannelMessageItemView = ({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
           <time className="text-xs text-muted-foreground" dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
+          <MessageActions
+            canDeleteForEveryone={canDeleteForEveryone}
+            disabled={isDeleting}
+            onDelete={onDelete}
+          />
         </div>
         <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
         {message.attachments?.length ? (

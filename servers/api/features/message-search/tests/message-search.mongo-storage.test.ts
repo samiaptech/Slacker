@@ -98,12 +98,14 @@ void test("queries only active workspace channels and DMs containing the request
   const channelMessageFilter = calls.find(({ name }) => name === CHANNEL_MESSAGES_COLLECTION)?.filter;
   assert.deepEqual(channelMessageFilter, {
     $text: { $search: "roadmap" },
-    channelId: { $in: ["joined-channel"] }
+    channelId: { $in: ["joined-channel"] },
+    hiddenForUserIds: { $nin: ["member-1"] }
   });
   assert.deepEqual(calls.find(({ name }) => name === DIRECT_MESSAGES_COLLECTION)?.filter, {
     $text: { $search: "roadmap" },
     workspaceId: "workspace-1",
-    conversationId: { $in: ["member-dm"] }
+    conversationId: { $in: ["member-dm"] },
+    hiddenForUserIds: { $nin: ["member-1"] }
   });
   assert.equal(calls.some(({ name }) => name === WORKSPACE_MEMBERSHIPS_COLLECTION), true);
 });

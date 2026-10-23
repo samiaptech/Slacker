@@ -21,7 +21,7 @@ import { resolveChannelMemberAccess, sendChannelAccessError, type ChannelAccessD
 type ChannelMessageControllerDependencies = ChannelAccessDependencies & Readonly<{
   service: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
-  realtime?: Pick<ChannelRealtimePublisher, "publishMessage">;
+  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageDeleted">;
 }>;
 
 const querySchema = z.object({
@@ -33,6 +33,7 @@ const messageBodySchema = z.object({
   text: z.string().default("")
     .refine((text) => Array.from(text).length <= CHANNEL_MESSAGE_MAX_LENGTH)
 }).strict();
+const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
 
 const toMessageResponse = (message: ChannelMessageWithSender): ChannelMessageResponse => {
   const attachments = message.attachments ?? [];
@@ -108,7 +109,74 @@ export const createListChannelMessagesController = (
       messages: result.messages.map(toMessageResponse),
       nextCursor: result.nextCursor
     };
+
     response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createDeleteChannelMessageController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ChannelMessageControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendChannelAccessError(access, next);
+      return;
+    }
+    const { channelId, messageId } = request.params;
+    if (typeof channelId !== "string" || typeof messageId !== "string" || !channelId || !messageId) {
+      next(channelUnavailableError());
+      return;
+    }
+    const parsed = deleteBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "scope", reason: "must_be_me_or_everyone" }
+      }));
+      return;
+    }
+    const result = await service.delete(
+      access.access.workspace.id,
+      channelId,
+      access.access.user.id,
+      messageId,
+      parsed.data.scope,
+      access.access.workspace.role === "admin"
+    );
+    if (result.kind === "unavailable") {
+      next(messageStorageError());
+      return;
+    }
+    if (result.kind === "not-found") {
+      next(channelUnavailableError());
+      return;
+    }
+    if (result.kind === "forbidden") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageDeleteForbidden,
+        message: ERROR_MESSAGES.messageDeleteForbidden,
+        status: HTTP_STATUS.forbidden
+      }));
+      return;
+    }
+    if (parsed.data.scope === "everyone") {
+      realtime?.publishMessageDeleted(access.access.workspace.id, channelId, messageId);
+    }
+    if (result.kind === "attachment-cleanup-failed") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageDeleteCleanupFailed,
+        message: ERROR_MESSAGES.messageDeleteCleanupFailed,
+        status: HTTP_STATUS.serviceUnavailable
+      }));
+      return;
+    }
+    response.status(HTTP_STATUS.noContent).end();
   } catch (error: unknown) {
     next(error);
   }

@@ -30,6 +30,69 @@ void test("accepts MongoDB's normalized representation of the channel message te
           name: CHANNEL_MESSAGES_COLLECTION,
           options: { validator: CHANNEL_MESSAGES_COLLECTION_VALIDATOR }
         });
+
+        void test("requires channel membership, hides per user, and restricts global deletion to authors or admins", async () => {
+          const attachment = {
+            id: "attachment-1",
+            name: "file.txt",
+            mimeType: "text/plain",
+            size: 4,
+            publicId: "private/file",
+            resourceType: "raw" as const,
+            format: "txt"
+          };
+          const calls: string[] = [];
+          const message = {
+            _id: "message-1",
+            channelId: "channel-1",
+            senderId: "author-1",
+            text: "hello",
+            createdAt: new Date(),
+            attachments: [attachment]
+          };
+          const definitions = CHANNEL_MESSAGES_INDEXES.map((index) => ({
+            name: index.options.name,
+            key: Object.values(index.keys).includes("text") ? { _fts: "text", _ftsx: 1 } : index.keys,
+            ...(Object.values(index.keys).includes("text") ? { weights: { text: 1 } } : {}),
+            unique: index.options.unique
+          }));
+          const database = {
+            listCollections: () => ({
+              next: () => Promise.resolve({
+                name: CHANNEL_MESSAGES_COLLECTION,
+                options: { validator: CHANNEL_MESSAGES_COLLECTION_VALIDATOR }
+              })
+            }),
+            collection: (name: string) => ({
+              indexes: () => Promise.resolve(definitions),
+              findOne: () => Promise.resolve(name === CHANNELS_COLLECTION
+                ? { _id: "channel-1", workspaceId: "workspace-1" }
+                : name === CHANNEL_MEMBERSHIPS_COLLECTION ? { channelId: "channel-1", userId: "member-1" } : message),
+              updateOne: (_filter: unknown, update: unknown) => {
+                calls.push(`update:${name}:${JSON.stringify(update)}`);
+                return Promise.resolve({ matchedCount: 1 });
+              },
+              deleteOne: () => {
+                calls.push(`delete:${name}`);
+                return Promise.resolve({ deletedCount: 1 });
+              }
+            })
+          } as unknown as MongoDatabase;
+          const storage = createMongoChannelMessageStorage(database, (operation) => operation({} as never));
+
+          assert.deepEqual(await storage.deleteForMember(
+            "workspace-1", "channel-1", "member-1", "message-1", "me", false
+          ), { kind: "deleted", attachments: [] });
+          assert.equal(calls.some((call) => call.includes("$addToSet")), true);
+          assert.deepEqual(await storage.deleteForMember(
+            "workspace-1", "channel-1", "member-1", "message-1", "everyone", false
+          ), { kind: "forbidden" });
+          assert.equal(calls.some((call) => call.startsWith(`delete:${CHANNEL_MESSAGES_COLLECTION}`)), false);
+          assert.deepEqual(await storage.deleteForMember(
+            "workspace-1", "channel-1", "member-1", "message-1", "everyone", true
+          ), { kind: "deleted", attachments: [attachment] });
+          assert.equal(calls.some((call) => call === `delete:${CHANNEL_MESSAGES_COLLECTION}`), true);
+        });
       }
     }),
     collection: (name: string) => ({

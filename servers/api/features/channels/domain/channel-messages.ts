@@ -13,6 +13,8 @@ export type ChannelMessage = Readonly<{
   attachments?: readonly ChatAttachmentRecord[];
 }>;
 
+export type ChannelMessageDeleteScope = "me" | "everyone";
+
 export type ChannelMessageCursor = Readonly<{
   createdAt: Date;
   id: string;

@@ -14,6 +14,7 @@ type DirectMessageSocket = Socket<
 
 export type DirectMessageRealtimePublisher = Readonly<{
   publishDirectMessage: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
+  publishMessageDeleted: (workspaceId: string, conversationId: string, messageId: string) => void;
   publishConversationChanged: (workspaceId: string) => void;
 }>;
 
@@ -143,6 +144,12 @@ export const createDirectMessageRealtime = ({
     publishDirectMessage: (workspaceId, conversationId, message) => {
       io.to(directMessageRoom(workspaceId, conversationId)).emit("direct-message:new", message);
       io.to(workspaceRoom(workspaceId)).emit("workspace:direct-messages:changed");
+    },
+    publishMessageDeleted: (workspaceId, conversationId, messageId) => {
+      io.to(directMessageRoom(workspaceId, conversationId)).emit("direct-message:deleted", {
+        conversationId,
+        messageId
+      });
     },
     publishConversationChanged: (workspaceId) => {
       io.to(workspaceRoom(workspaceId)).emit("workspace:direct-messages:changed");

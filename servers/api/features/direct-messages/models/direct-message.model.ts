@@ -46,6 +46,11 @@ export const DIRECT_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
       senderId: Object.freeze({ bsonType: "string", minLength: 1 }),
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
+      hiddenForUserIds: Object.freeze({
+        bsonType: "array",
+        uniqueItems: true,
+        items: Object.freeze({ bsonType: "string", minLength: 1 })
+      }),
       attachments: Object.freeze({
         bsonType: "array",
         maxItems: 5,
@@ -91,4 +96,7 @@ export const DIRECT_MESSAGES_INDEXES = Object.freeze([
 ]);
 
 export type DirectConversationDocument = Omit<DirectConversation, "id"> & Readonly<{ _id: string }>;
-export type DirectMessageDocument = Omit<DirectMessage, "id"> & Readonly<{ _id: string }>;
+export type DirectMessageDocument = Omit<DirectMessage, "id"> & Readonly<{
+  _id: string;
+  hiddenForUserIds?: readonly string[];
+}>;

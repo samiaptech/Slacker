@@ -9,6 +9,7 @@ export {
 export { createJoinChannelController, createLeaveChannelController } from "./channel.controller.js";
 export {
   createAuthorizeChannelMessageUploadController,
+  createDeleteChannelMessageController,
   createDownloadChannelAttachmentController,
   createListChannelMessagesController,
   createSendChannelMessageController

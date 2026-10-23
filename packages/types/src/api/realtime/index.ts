@@ -21,11 +21,13 @@ export type RealtimeServerEvents = Readonly<{
   "workspace:members:changed": () => void;
   "workspace:access:revoked": (payload: Readonly<{ workspaceId: string }>) => void;
   "channel:message:new": (message: ChannelMessageResponse) => void;
+  "channel:message:deleted": (payload: Readonly<{ channelId: string; messageId: string }>) => void;
   "channel:members:changed": (payload: Readonly<{ channelId: string }>) => void;
   "channel:access:revoked": (payload: Readonly<{ workspaceId: string; channelId: string }>) => void;
   "channel:typing": (payload: Readonly<{ channelId: string; userId: string; active: boolean }>) => void;
   "workspace:direct-messages:changed": () => void;
   "direct-message:ready": (payload: Readonly<{ conversationId: string }>) => void;
   "direct-message:new": (message: DirectMessageResponse) => void;
+  "direct-message:deleted": (payload: Readonly<{ conversationId: string; messageId: string }>) => void;
   "direct-message:typing": (payload: Readonly<{ conversationId: string; userId: string; active: boolean }>) => void;
 }>;

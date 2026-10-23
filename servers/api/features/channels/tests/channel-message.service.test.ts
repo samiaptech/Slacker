@@ -44,6 +44,7 @@ const createService = (
       calls.push({ operation: "send", channelId, userId, record });
       return Promise.resolve("created" as const);
     },
+    deleteForMember: () => Promise.resolve({ kind: "not-found" as const }),
     ...overrides
   };
   const service = createChannelMessageService({
@@ -131,6 +132,56 @@ void test("keeps unavailable storage explicit instead of reporting a successful 
   const storageError = Object.assign(new Error("migration required"), { kind: "channel-storage-unavailable" as const });
   const { service } = createService({
     findForMember: () => Promise.reject(storageError)
+  });
+
+  void test("deletes messages with persisted scope and reports attachment cleanup failures", async () => {
+    const attachment: ChatAttachmentRecord = {
+      id: "attachment-delete",
+      name: "file.txt",
+      mimeType: "text/plain",
+      size: 4,
+      publicId: "private/delete-me",
+      resourceType: "raw",
+      format: "txt"
+    };
+    const deletionCalls: unknown[][] = [];
+    const serviceWithCleanup = createService({
+      deleteForMember: (...args) => {
+        deletionCalls.push(args);
+        return Promise.resolve({ kind: "deleted", attachments: [attachment] });
+      }
+    }, undefined, {
+      upload: () => Promise.resolve(attachment),
+      delete: () => Promise.resolve(),
+      download: () => Promise.resolve(Buffer.alloc(0))
+    }).service;
+
+    assert.deepEqual(await serviceWithCleanup.delete(
+      "workspace-1", "channel-1", "user-1", "message-1", "everyone", true
+    ), { kind: "deleted" });
+    assert.deepEqual(deletionCalls[0], [
+      "workspace-1", "channel-1", "user-1", "message-1", "everyone", true
+    ]);
+
+    const cleanupFailed = createService({
+      deleteForMember: () => Promise.resolve({ kind: "deleted", attachments: [attachment] })
+    }, undefined, {
+      upload: () => Promise.resolve(attachment),
+      delete: () => Promise.reject(new Error("Cloudinary unavailable")),
+      download: () => Promise.resolve(Buffer.alloc(0))
+    }).service;
+    assert.deepEqual(await cleanupFailed.delete(
+      "workspace-1", "channel-1", "user-1", "message-1", "everyone", false
+    ), { kind: "attachment-cleanup-failed" });
+
+    const persistenceFailed = createService({
+      deleteForMember: () => Promise.reject(Object.assign(new Error("database unavailable"), {
+        kind: "channel-storage-unavailable" as const
+      }))
+    }).service;
+    assert.deepEqual(await persistenceFailed.delete(
+      "workspace-1", "channel-1", "user-1", "message-1", "everyone", true
+    ), { kind: "unavailable" });
   });
 
   void test("stores private attachment metadata with a message and supports attachment-only sends", async () => {

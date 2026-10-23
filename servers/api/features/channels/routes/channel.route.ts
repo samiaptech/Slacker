@@ -15,6 +15,7 @@ import {
   createRemoveChannelMemberController,
   createListChannelsController,
   createListChannelMessagesController,
+  createDeleteChannelMessageController,
   createAuthorizeChannelMessageUploadController,
   createSendChannelMessageController,
   createDownloadChannelAttachmentController,
@@ -101,6 +102,10 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     createAuthorizeChannelMessageUploadController(messageDependencies),
     parseMessageAttachments,
     createSendChannelMessageController(messageDependencies)
+  );
+  router.delete(
+    "/channels/:channelId/messages/:messageId",
+    createDeleteChannelMessageController(messageDependencies)
   );
   router.get(
     "/channels/:channelId/messages/:messageId/attachments/:attachmentId",
