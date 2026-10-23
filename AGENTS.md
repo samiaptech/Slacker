@@ -353,5 +353,6 @@ Updated: 2026-10-23.
   replica-set integration tests skipped); API typecheck/lint, Vercel bundle build, bundle
   syntax check, repository check, and `git diff --check` passed. Cross-instance delivery was
   not tested against a live isolated replica set because `MONGODB_TEST_URI` was not provided.
-  The fix is implemented on branch `slacker`; production deployment and multi-client
-  verification remain pending. Presence still uses process-local tracking.
+  The adapter fix was committed as `3f36bbf` and pushed to `origin/main`; production
+  deployment and multi-client verification remain pending. Presence still uses
+  process-local tracking.
