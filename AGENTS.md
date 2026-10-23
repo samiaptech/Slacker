@@ -102,7 +102,7 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-22.
+Updated: 2026-10-23.
 
 - **Ownership:** Codex handles frontend design and interactions; the backend agent handles
   APIs, contracts, persistence, authorization, and backend validation. Coordinate changes
@@ -344,3 +344,11 @@ Updated: 2026-10-22.
   passed. No live MongoDB latency benchmark or populated-browser perceived-send measurement
   was run. Restart/redeploy the API to use these changes; Codex owns the pending frontend
   optimistic-send behavior listed above.
+
+- **Vercel web build fix:** Deployment `700cdb5` failed because `@workspace/ui` exports
+  generated files from `packages/ui/dist`, which is ignored and was not built by Vercel's
+  direct `next build`. The web `build` script now builds `@workspace/ui` before Next.js.
+  Production web build passed with a non-secret API URL override; web tests (20), typecheck,
+  and `git diff --check` passed. ESLint was not applicable to the JSON manifest. This fix is
+  uncommitted on local branch `slacker`; redeploy after push and confirm Vercel resolves the
+  shared UI package.
