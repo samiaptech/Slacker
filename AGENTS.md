@@ -401,7 +401,17 @@ Updated: 2026-10-26.
   lint, and `git diff --check` passed. No populated-browser CSP/OAuth test or production
   response-header check ran. Changes remain uncommitted alongside unrelated work. Operator:
   verify CSP console reports, OAuth redirects, cookies, and API/download responses in a
-  populated browser and deployed environment.
+  populated browser and deployed environment. CSP follow-up: the root layout had remained
+  eligible for static HTML while the proxy emitted a different nonce for every response,
+  leaving build-time scripts blocked by the live policy. The root layout now reads request
+  headers to force dynamic rendering, and the proxy forwards `x-nonce` with the CSP. Web
+  typecheck and focused lint passed; the production Webpack build reports all routes as
+  dynamic. A local production `/sign-in` response was non-cacheable and all 18 rendered
+  scripts carried the exact nonce from its CSP. The currently deployed `/sign-in` still
+  returns a cached prerendered page with no script nonces, confirming it needs redeployment.
+  Turbopack build could not spawn its CSS worker in this environment. The browser console's
+  `content.js` eval violation is from a browser extension, separate from the app CSP.
+  Redeployment and browser verification remain pending.
 
 - **Socket session lifecycle:** Socket.IO authenticates Better Auth sessions at handshake
   and now revalidates every 30 seconds; invalid sessions, user changes, or authentication

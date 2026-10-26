@@ -20,6 +20,7 @@ export const proxy = (request: NextRequest): NextResponse => {
     production: process.env.NODE_ENV === "production"
   });
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
 
