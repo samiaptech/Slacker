@@ -11,6 +11,7 @@ import {
 } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
+import { requestChannelMessages } from "./channel-message-request";
 import { ChannelMessageItem } from "./channel-message-item";
 import { ChannelSystemMessageItem } from "./channel-system-message-item";
 import {
@@ -138,22 +139,22 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   }, [channelId, realtime.socket]);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
     const loadMessages = async (): Promise<void> => {
       historyAnchorRef.current = null;
       setIsLoading(true);
       setLoadError(null);
       setAccessRevoked(false);
       try {
-        const url = new URL(`/channels/${encodeURIComponent(channelId)}/messages`, apiBaseUrl);
-        url.searchParams.set("limit", String(MESSAGE_PAGE_SIZE));
-        const response = await fetch(url, {
-          credentials: "include",
-          cache: "no-store",
-          headers: { "X-Workspace-Id": activeWorkspace.id },
-          signal: controller.signal
+        const response = await requestChannelMessages({
+          apiBaseUrl,
+          workspaceId: activeWorkspace.id,
+          userId: currentUser.id,
+          channelId,
+          limit: MESSAGE_PAGE_SIZE
         });
-        if (!response.ok) {
+        if (!active) return;
+        if (response.status < 200 || response.status >= 300) {
           if (response.status === 404 || response.status === 403) revokeAccess();
           setLoadError(response.status === 401
             ? "Your session expired. Sign in again to read this conversation."
@@ -164,7 +165,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                 : "Messages could not be loaded. Please try again.");
           return;
         }
-        const parsed = channelMessageListResponseSchema.safeParse(await response.json());
+        const parsed = channelMessageListResponseSchema.safeParse(response.body);
         if (!parsed.success) {
           setLoadError("The server returned an invalid message history. Please try again.");
           return;
@@ -180,14 +181,15 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
         shouldScrollToBottom.current = true;
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!active) return;
         setLoadError("Messages could not be loaded. Check your connection and try again.");
       } finally {
-        if (!controller.signal.aborted) setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     };
     void loadMessages();
-    return () => controller.abort();
-  }, [activeWorkspace.id, apiBaseUrl, channelId, reloadToken, revokeAccess]);
+    return () => { active = false; };
+  }, [activeWorkspace.id, apiBaseUrl, channelId, currentUser.id, reloadToken, revokeAccess]);
 
   useEffect(() => {
     hasReceivedChannelReadyRef.current = false;

@@ -241,6 +241,7 @@ Updated: 2026-10-26.
   the authenticated sender profile and avoid a post-save profile query; channel sends
   avoid a redundant channel read while retaining the membership check and channel revision
   write in the transaction. API fake-storage tests assert readiness checks are not repeated.
+  Channel history now shares matching in-flight reads without retaining settled responses; local browser history requests dropped from five to one, and switching to an already-loaded workspace channel took about 1.25 seconds. Notification loads discard stale responses after socket/local-read changes. Cold reload startup and production/database latency remain unmeasured.
   Local development uses localhost;
   Google OAuth accepts localhost callbacks, not raw private LAN IP redirect hosts. Do not
   inspect `.env`.

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NotificationResource, RealtimeServerEvents } from "@workspace/types";
 import type { ChannelRealtimeSocket } from "@/features/channels/public";
+import { shouldApplyNotificationLoad } from "./notification-load-state";
 import {
   notificationEventSchema,
   notificationListResponseSchema,
@@ -43,8 +44,13 @@ export const useNotifications = (
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const hasConnectedRef = useRef(false);
+  const notificationRevisionRef = useRef(0);
+  const loadRequestIdRef = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const requestRevision = notificationRevisionRef.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -73,14 +79,26 @@ export const useNotifications = (
       if (!page.success || count === null) {
         throw new Error("The server returned an invalid notification response.");
       }
+      if (!shouldApplyNotificationLoad(
+        requestId,
+        loadRequestIdRef.current,
+        requestRevision,
+        notificationRevisionRef.current
+      )) return;
       setNotifications(page.data.notifications);
       setNextCursor(page.data.nextCursor);
       setUnreadCount(count);
     } catch (failure: unknown) {
       if (failure instanceof DOMException && failure.name === "AbortError") return;
+      if (!shouldApplyNotificationLoad(
+        requestId,
+        loadRequestIdRef.current,
+        requestRevision,
+        notificationRevisionRef.current
+      )) return;
       setError(failure instanceof Error ? failure.message : "Notifications could not be loaded.");
     } finally {
-      if (!signal?.aborted) setIsLoading(false);
+      if (!signal?.aborted && requestId === loadRequestIdRef.current) setIsLoading(false);
     }
   }, [apiBaseUrl]);
 
@@ -99,6 +117,7 @@ export const useNotifications = (
       const parsed = notificationEventSchema.safeParse(payload);
       if (!parsed.success) return;
       const { notification } = parsed.data;
+      notificationRevisionRef.current += 1;
       setNotifications((current) => {
         if (current.some((item) => item.id === notification.id)) return current;
         return [notification, ...current].slice(0, NOTIFICATION_PAGE_SIZE);
@@ -107,9 +126,15 @@ export const useNotifications = (
     };
     const onUnreadCount = (payload: Parameters<RealtimeServerEvents["notification:unread-count"]>[0]): void => {
       const count = unreadCountFrom(payload);
-      if (count !== null) setUnreadCount(count);
+      if (count !== null) {
+        notificationRevisionRef.current += 1;
+        setUnreadCount(count);
+      }
     };
-    const onConnect = (): void => { void load(); };
+    const onConnect = (): void => {
+      if (hasConnectedRef.current) void load();
+      hasConnectedRef.current = true;
+    };
     socket.on("notification:new", onNotification);
     socket.on("notification:unread-count", onUnreadCount);
     socket.on("connect", onConnect);
@@ -157,6 +182,7 @@ export const useNotifications = (
           : "This notification could not be marked as read.");
         return false;
       }
+      notificationRevisionRef.current += 1;
       setNotifications((current) => current.map((notification) =>
         notification.id === notificationId && notification.readAt === null
           ? { ...notification, readAt: new Date().toISOString() }
@@ -171,6 +197,7 @@ export const useNotifications = (
   }, [apiBaseUrl]);
 
   const markResourceReadLocally = useCallback((resource: NotificationResource): void => {
+    notificationRevisionRef.current += 1;
     setNotifications((current) => current.map((notification) =>
       notification.resource.type === resource.type
         && notification.resource.id === resource.id
