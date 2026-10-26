@@ -3,7 +3,7 @@
 Direct messages let active members of the same workspace start and resume a
 private one-to-one conversation. A member pair has one canonical conversation
 per workspace; opening it again returns the existing conversation. Group DMs,
-blocking, unread state, and participant removal are not part of this feature.
+blocking, and participant removal are not part of this feature.
 
 ## API and persistence
 
@@ -81,3 +81,12 @@ The focused API tests are part of:
 ```text
 pnpm --filter @workspace/api test
 ```
+
+## Notifications and read state
+
+An incoming message creates one durable `direct_message` notification for the
+other participant; the sender is suppressed. Fetching
+`GET /direct-messages/:conversationId/messages` marks the caller's notifications
+for that conversation read after participant authorization succeeds. The inbox,
+unread-count, read endpoints, and `notification:new` / `notification:unread-count`
+realtime payloads are documented in the [API README](../../README.md#in-app-notifications).

@@ -6,6 +6,7 @@ import { createWorkspaceServiceFixture } from "../../../tests/workspace-service-
 import type { AuthenticationIntegration } from "../../../integrations/index.js";
 import type { ApiConfig } from "../../../types/index.js";
 import type { WorkspaceChannelRealtimePublisher as ChannelRealtimePublisher } from "../../channels/public/index.js";
+import { allowApiRateLimit } from "../../../tests/rate-limit-fixture.js";
 
 const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 const config: ApiConfig = {
@@ -52,6 +53,8 @@ const startApi = async (
   const app = createApp({
     config,
     logger,
+    rateLimiter: allowApiRateLimit,
+    trustVercelForwardedFor: false,
     authentication: createAuthentication(),
     channelService: {
       create: () => Promise.resolve({ kind: "unavailable" as const }),

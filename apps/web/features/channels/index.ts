@@ -20,6 +20,7 @@ export type {
   ChannelMembersResponseView,
   ChannelResponseView,
   ChannelMessageListView,
+  ChannelHistoryEntryView,
   ChannelMessageView,
   CreateChannelFormErrors,
   CreateChannelFormValues

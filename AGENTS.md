@@ -102,7 +102,7 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-23.
+Updated: 2026-10-26.
 
 - **Ownership:** Codex handles frontend design and interactions; the backend agent handles
   APIs, contracts, persistence, authorization, and backend validation. Coordinate changes
@@ -210,7 +210,7 @@ Updated: 2026-10-23.
   two channels; both a recent result and an older cross-channel result navigated to and
   highlighted the exact message. Web tests (20), typecheck, focused ESLint, and
   `git diff --check` pass. MongoDB query-plan and search-performance checks remain pending;
-  the process-local limiter is not shared across API instances.
+  search limits now share the MongoDB-backed rolling-window limiter across API instances.
   Frontend follow-up: the leave confirmation dialog was mounted inside the dropdown and
   disappeared when the dropdown closed; it now stays mounted in the workspace shell.
   After a successful leave, the frontend selects another known workspace before reloading;
@@ -287,10 +287,21 @@ Updated: 2026-10-23.
   test database to run workspace-leave rollback coverage. Codex: verify the leave
   confirmation and next-workspace/create-workspace redirect in a populated browser; also
   verify older-page scroll anchoring and run MongoDB search query-plan/performance checks
-  when an authorized database is available. Codex: add an
-  optimistic pending-message state for channel and DM sends, reconcile it with the persisted
-  API/Socket.IO message, preserve retry/error behavior, and capture perceived-send and API
-  timing in a populated browser. Continue production UI decomposition where cohesive
+  when an authorized database is available. Codex added optimistic pending-message rows
+  for channel and DM sends, reconciled them with API/Socket.IO messages, and preserved
+  retry/error behavior. Web typecheck passed; focused ESLint and diff checks passed. A
+  populated-browser timing check remains pending, and the change is local and uncommitted.
+  Browse Channels join actions use a forest-green filled button with readable white text,
+  a lighter green hover state, and a darker active state to fit the dark sidebar. Focused
+  ESLint and `git diff --check` pass. Channel and DM image attachments now load previews
+  through authorized API requests when near the viewport and open in a full-screen dialog;
+  document attachments retain their download action. Web typecheck and focused ESLint pass.
+  Browser image rendering was not visually verified; the frontend changes remain local.
+  On narrow screens, channel-name clicks now open a dedicated `/channels/:id/about` view
+  with a back-to-conversation link, removing the expanding mobile About accordion from the
+  conversation. Wider screens retain the About side panel. Web typecheck, focused ESLint,
+  and `git diff --check` pass; browser responsive verification remains pending.
+  Continue production UI decomposition where cohesive
   boundaries improve readability. User: confirm local web/API configuration uses localhost
   and restart both apps if it is stale. The user is preparing a Vercel production
   deployment. Root `vercel.json` routes `web` and `api` on one domain, using
@@ -366,3 +377,63 @@ Updated: 2026-10-23.
   `git diff --check` passed. No live DB migration or production-browser check was run.
   Work remains uncommitted on `slacker`. After deployment, run `channels:initialize` and
   `direct-messages:initialize`; then verify both deletion scopes from two clients.
+
+- **Shared API rate limits:** Every non-preflight request is limited to 120 requests per
+  client IP per rolling minute using atomic MongoDB updates; health, authentication, and
+  unknown routes have no exclusions. Message search retains its separate 30-per-user
+  rolling-minute quota and search-specific 429 response. Vercel uses its platform client-IP
+  header only in Vercel runtime; other deployments use the direct socket address, never
+  generic `x-forwarded-for`. MongoDB limiter failures fail closed with HTTP 503. API tests
+  passed (150 passed, 2 optional integration tests skipped); API typecheck, lint, build,
+  shared-types typecheck, and `git diff --check` passed. Deterministic adapter tests cover
+  cross-instance atomic decisions; no live MongoDB verification ran. Changes remain
+  uncommitted alongside unrelated web edits in the shared checkout. Operator: restart or
+  redeploy the API, then verify shared limits against the configured MongoDB.
+
+- **Web/API security headers:** The web `proxy.ts` creates a per-request nonce CSP with
+  same-origin scripts, API/realtime connection origins, and Google profile image support;
+  `unsafe-eval` is development-only, and `unsafe-inline` is limited to style attributes
+  needed by existing UI components. API responses set restrictive CSP, `nosniff`, frame,
+  referrer, and same-origin resource policies, including errors and CORS preflights.
+  Better Auth already enables secure cookies in production and uses HttpOnly cookies by
+  default. The web app has no third-party scripts, so SRI does not currently apply. Web
+  tests (23), typecheck, focused lint, production Next build, API tests, typecheck, focused
+  lint, and `git diff --check` passed. No populated-browser CSP/OAuth test or production
+  response-header check ran. Changes remain uncommitted alongside unrelated work. Operator:
+  verify CSP console reports, OAuth redirects, cookies, and API/download responses in a
+  populated browser and deployed environment.
+
+- **Socket session lifecycle:** Socket.IO authenticates Better Auth sessions at handshake
+  and now revalidates every 30 seconds; invalid sessions, user changes, or authentication
+  storage errors disconnect established sockets. Existing workspace-removal revocation
+  remains active. The handshake also requires an exact configured web origin and rejects
+  missing origins. Socket auth/session/origin tests, API tests, typecheck, build, focused
+  lint, and `git diff --check` passed; live lifecycle behavior has not been tested against
+  production MongoDB or multiple deployed instances.
+
+- **Socket abuse limits:** Socket.IO now caps each API instance at five sockets per user
+  and 20 per client IP, 30 inbound events/user/second with a token bucket, and 16 KiB per
+  packet. Vercel's platform IP header is trusted only in Vercel runtime. Counters are
+  process-local and multiply across instances; chat sends remain HTTP and use the API-wide
+  per-IP limit. Full API tests passed (154 passed, 2 skipped), API build/typecheck and
+  focused lint passed, including connection/event/payload tests. MongoDB multi-instance
+  test was skipped; work remains uncommitted and undeployed.
+
+- **In-app notifications:** The API stores per-user notifications for channel messages and
+  mentions, incoming DMs, channel joins/leaves, and channel updates; authenticated inbox,
+  unread-count, read endpoints, and recipient-only realtime events are wired into the web
+  bell inbox and channel/DM unread dots. Opening a notification navigates to its workspace
+  resource, and opening channel/DM history marks its notifications read. Self-leave persists
+  and broadcasts a typed `member_left` system entry rendered in channel history. Public
+  contracts are in `packages/types`; HTTP/realtime details and migration instructions are in
+  `servers/api/README.md`. Root `pnpm run initialize` and the API task catalog now include
+  `notifications:initialize`. Dependency remediation pins API multer at 2.5.0 and workspace
+  Zod at 4.6.7, overrides vulnerable transitive Zod 3 resolutions to patched Zod 4, and
+  updates the lockfile to patched body-parser and undici releases. `pnpm audit
+  --audit-level high` passes; the full audit still reports two low and four moderate
+  advisories. Repository tests passed (82 control-plane tests; API 160 passed with two
+  optional MongoDB tests skipped; UI 1, web 26, and logging 2). Repository typecheck, lint,
+  build, architecture check, and security scan passed; the Vercel API bundle build and
+  syntax check passed. No database initializer or live MongoDB test was run; before
+  deployment, an authorized operator must run the aggregate initializer against the
+  intended database.

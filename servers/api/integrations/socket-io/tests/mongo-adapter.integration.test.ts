@@ -63,6 +63,7 @@ void test("broadcasts realtime events across Socket.IO instances through MongoDB
       socketIo,
       client: createClient(`http://127.0.0.1:${address.port.toString()}`, {
         autoConnect: false,
+        extraHeaders: { Origin: "http://localhost:3000" },
         reconnection: false,
         transports: ["websocket"],
         timeout: 3_000

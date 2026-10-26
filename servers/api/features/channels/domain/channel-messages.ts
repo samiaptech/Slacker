@@ -11,7 +11,20 @@ export type ChannelMessage = Readonly<{
   text: string;
   createdAt: Date;
   attachments?: readonly ChatAttachmentRecord[];
+  type?: "message";
 }>;
+
+export type ChannelSystemEntry = Readonly<{
+  id: string;
+  channelId: string;
+  type: "system";
+  systemEvent: "member_left";
+  actor: Readonly<{ id: string; name: string }>;
+  text: "";
+  createdAt: Date;
+}>;
+
+export type ChannelHistoryEntry = ChannelMessage | ChannelSystemEntry;
 
 export type ChannelMessageDeleteScope = "me" | "everyone";
 

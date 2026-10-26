@@ -5,6 +5,7 @@ import { createApp, createServer } from "../../../bootstrap/index.js";
 import type { AuthenticationIntegration } from "../../../integrations/index.js";
 import type { ApiConfig } from "../../../types/index.js";
 import { createWorkspaceServiceFixture } from "../../../tests/workspace-service-fixture.js";
+import { allowApiRateLimit } from "../../../tests/rate-limit-fixture.js";
 import {
   createDirectMessageRepository,
   createDirectMessageService,
@@ -84,6 +85,8 @@ void test("uses authenticated workspace role for DM global deletion while requir
   const app = createApp({
     config,
     logger,
+    rateLimiter: allowApiRateLimit,
+    trustVercelForwardedFor: false,
     authentication,
     workspaceService: workspaceFixture.service,
     channelService,

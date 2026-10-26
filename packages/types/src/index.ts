@@ -13,8 +13,10 @@ export type {
   ChannelMembersResponse,
   ChannelMembershipResponse,
   ChannelResponse,
+  ChannelHistoryEntryResponse,
   ChannelMessageListResponse,
   ChannelMessageResponse,
+  ChannelSystemEventResponse,
   DirectConversationListResponse,
   DirectConversationResponse,
   DirectMessageListResponse,
@@ -33,5 +35,9 @@ export type {
   WorkspaceMembershipSummary,
   WorkspaceMutationResponse,
   RealtimeClientEvents,
-  RealtimeServerEvents
+  RealtimeServerEvents,
+  NotificationListResponse,
+  NotificationResource,
+  NotificationResponse,
+  NotificationType
 } from "./api/index.js";

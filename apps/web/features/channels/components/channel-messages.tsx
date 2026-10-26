@@ -6,17 +6,22 @@ import { Button, Textarea } from "@workspace/ui";
 import {
   channelMessageListResponseSchema,
   channelMessageResponseSchema,
+  type ChannelHistoryEntryView,
   type ChannelMessageView
 } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelMessageItem } from "./channel-message-item";
+import { ChannelSystemMessageItem } from "./channel-system-message-item";
 import {
   captureHistoryScrollAnchor,
   restoreHistoryScrollAnchor,
   getMessageDeleteFailure,
+  findMatchingPendingMessageId,
   type HistoryScrollAnchor,
-  type MessageDeleteScope
+  type MessageAttachment,
+  type MessageDeleteScope,
+  type MessageWithDelivery
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -24,6 +29,8 @@ const MESSAGE_PAGE_SIZE = 50;
 const MAX_ATTACHMENT_COUNT = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.csv,.md";
+type ChannelTimelineMessage = MessageWithDelivery<ChannelMessageView>
+  | Extract<ChannelHistoryEntryView, { type: "system" }>;
 
 type ChannelMessagesProps = Readonly<{
   apiBaseUrl: string;
@@ -34,15 +41,46 @@ type ChannelMessagesProps = Readonly<{
 }>;
 
 const mergeMessages = (
-  current: readonly ChannelMessageView[],
-  incoming: readonly ChannelMessageView[]
-): readonly ChannelMessageView[] => {
+  current: readonly ChannelTimelineMessage[],
+  incoming: readonly ChannelTimelineMessage[]
+): readonly ChannelTimelineMessage[] => {
   const byId = new Map(current.map((message) => [message.id, message]));
   incoming.forEach((message) => byId.set(message.id, message));
   return [...byId.values()].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   );
 };
+
+const mergeIncomingMessages = (
+  current: readonly ChannelTimelineMessage[],
+  incoming: readonly ChannelHistoryEntryView[]
+): readonly ChannelTimelineMessage[] => incoming.reduce((messages, message) => {
+  if (message.type === "system") return mergeMessages(messages, [message]);
+  const userMessages = messages.filter(
+    (entry): entry is MessageWithDelivery<ChannelMessageView> =>
+      entry.type !== "system" && "senderId" in entry
+  );
+  const pendingId = findMatchingPendingMessageId(userMessages, message);
+  const withoutPending = pendingId
+    ? messages.filter((entry) => entry.id !== pendingId)
+    : messages;
+  return mergeMessages(withoutPending, [message]);
+}, current);
+
+const updatePendingChannelMessage = (
+  messages: readonly ChannelTimelineMessage[],
+  messageId: string,
+  deliveryState: "sending" | "failed"
+): readonly ChannelTimelineMessage[] => messages.map((message) =>
+  message.id === messageId && message.type !== "system" && "senderId" in message
+    ? { ...message, deliveryState }
+    : message
+);
+
+const isPendingChannelMessage = (
+  message: ChannelTimelineMessage
+): message is MessageWithDelivery<ChannelMessageView> =>
+  message.type !== "system" && "senderId" in message;
 
 const formatFileSize = (size: number): string => size < 1024 * 1024
   ? `${Math.max(1, Math.round(size / 1024))} KB`
@@ -51,7 +89,7 @@ const formatFileSize = (size: number): string => size < 1024 * 1024
 export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDescription, canSend }: ChannelMessagesProps): ReactElement => {
   const { activeWorkspace, currentUser } = useWorkspaceContext();
   const realtime = useChannelRealtime();
-  const [messages, setMessages] = useState<readonly ChannelMessageView[]>([]);
+  const [messages, setMessages] = useState<readonly ChannelTimelineMessage[]>([]);
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -131,7 +169,12 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
           setLoadError("The server returned an invalid message history. Please try again.");
           return;
         }
-        setMessages(parsed.data.messages);
+        setMessages((current) => mergeIncomingMessages(
+          current.filter((message) =>
+            isPendingChannelMessage(message) && message.deliveryState && message.channelId === channelId
+          ),
+          parsed.data.messages
+        ));
         setNextCursor(parsed.data.nextCursor);
         setLoadedChannelId(channelId);
         shouldScrollToBottom.current = true;
@@ -166,7 +209,12 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     const onMessage = (message: ChannelMessageView): void => {
       if (message.channelId !== channelId) return;
       shouldScrollToBottom.current = true;
-      setMessages((current) => mergeMessages(current, [message]));
+      setMessages((current) => mergeIncomingMessages(current, [message]));
+    };
+    const onSystemMessage = (message: Extract<ChannelHistoryEntryView, { type: "system" }>): void => {
+      if (message.channelId !== channelId) return;
+      shouldScrollToBottom.current = true;
+      setMessages((current) => mergeIncomingMessages(current, [message]));
     };
     const onMessageDeleted = (change: Readonly<{ channelId: string; messageId: string }>): void => {
       if (change.channelId !== channelId) return;
@@ -200,6 +248,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     };
     socket.on("channel:ready", onChannelReady);
     socket.on("channel:message:new", onMessage);
+    socket.on("channel:system:new", onSystemMessage);
     socket.on("channel:message:deleted", onMessageDeleted);
     socket.on("channel:access:revoked", onAccessRevoked);
     socket.on("workspace:access:revoked", onWorkspaceAccessRevoked);
@@ -208,6 +257,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     return () => {
       socket.off("channel:ready", onChannelReady);
       socket.off("channel:message:new", onMessage);
+      socket.off("channel:system:new", onSystemMessage);
       socket.off("channel:message:deleted", onMessageDeleted);
       socket.off("channel:access:revoked", onAccessRevoked);
       socket.off("workspace:access:revoked", onWorkspaceAccessRevoked);
@@ -270,23 +320,22 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     }
   }, [activeWorkspace.id, apiBaseUrl, channelId, isLoadingOlder, nextCursor, revokeAccess]);
 
-  const sendMessage = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    const text = draft;
-    if ((!text.trim() && selectedFiles.length === 0) || isSending || !canSend || accessRevoked) return;
+  const submitMessage = async (pending: MessageWithDelivery<ChannelMessageView>): Promise<void> => {
     setIsSending(true);
     setSendError(null);
+    setMessages((current) => updatePendingChannelMessage(current, pending.id, "sending"));
     try {
       const headers: Record<string, string> = { "X-Workspace-Id": activeWorkspace.id };
       let body: BodyInit;
-      if (selectedFiles.length > 0) {
+      const files = pending.pendingFiles ?? [];
+      if (files.length > 0) {
         const formData = new FormData();
-        if (text.trim()) formData.set("text", text);
-        selectedFiles.forEach((file) => formData.append("files", file));
+        if (pending.text.trim()) formData.set("text", pending.text);
+        files.forEach((file) => formData.append("files", file));
         body = formData;
       } else {
         headers["Content-Type"] = "application/json";
-        body = JSON.stringify({ text });
+        body = JSON.stringify({ text: pending.text });
       }
       const response = await fetch(new URL(`/channels/${encodeURIComponent(channelId)}/messages`, apiBaseUrl), {
         method: "POST",
@@ -297,30 +346,69 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       });
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) revokeAccess();
-        setSendError(response.status === 401
+        const error = response.status === 401
           ? "Your session expired. Sign in again to send a message."
           : response.status === 404 || response.status === 403
             ? "You no longer have access to this channel."
             : response.status === 400
               ? "Messages must contain text and stay within 4,000 characters."
-              : "Your message could not be sent. Please try again.");
+              : "Your message could not be sent. Please try again.";
+        setSendError(error);
+        setMessages((current) => updatePendingChannelMessage(current, pending.id, "failed"));
         return;
       }
       const parsed = channelMessageResponseSchema.safeParse(await response.json());
       if (!parsed.success) {
         setSendError("The server returned an invalid message response. Your message may have been saved; refresh before retrying.");
+        setMessages((current) => updatePendingChannelMessage(current, pending.id, "failed"));
         return;
       }
       shouldScrollToBottom.current = true;
-      setMessages((current) => mergeMessages(current, [parsed.data]));
-      setDraft("");
-      setSelectedFiles([]);
+      setMessages((current) => mergeIncomingMessages(
+        current.filter((message) => message.id !== pending.id),
+        [parsed.data]
+      ));
       setAttachmentError(null);
     } catch {
       setSendError("Your message could not be sent. Check your connection and try again.");
+      setMessages((current) => updatePendingChannelMessage(current, pending.id, "failed"));
     } finally {
       setIsSending(false);
     }
+  };
+
+  const sendMessage = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const text = draft;
+    const files = selectedFiles;
+    if ((!text.trim() && files.length === 0) || isSending || !canSend || accessRevoked) return;
+    const pending: MessageWithDelivery<ChannelMessageView> = {
+      id: `pending-${crypto.randomUUID()}`,
+      channelId,
+      senderId: currentUser.id,
+      text,
+      createdAt: new Date().toISOString(),
+      type: "message",
+      attachments: [],
+      sender: { id: currentUser.id, name: currentUser.name, image: currentUser.image },
+      deliveryState: "sending",
+      pendingFiles: files
+    };
+    shouldScrollToBottom.current = true;
+    setMessages((current) => mergeMessages(current, [pending]));
+    setDraft("");
+    setSelectedFiles([]);
+    setSendError(null);
+    stopTyping();
+    void submitMessage(pending);
+  };
+
+  const retryMessage = (messageId: string): void => {
+    const pending = messages.find(
+      (message): message is MessageWithDelivery<ChannelMessageView> =>
+        isPendingChannelMessage(message) && message.id === messageId && message.deliveryState === "failed"
+    );
+    if (pending && !isSending) void submitMessage(pending);
   };
 
   const addAttachments = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -369,6 +457,21 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       setDownloadingAttachmentId(null);
     }
   }, [activeWorkspace.id, apiBaseUrl, downloadingAttachmentId]);
+
+  const loadImagePreview = useCallback(async (attachment: MessageAttachment, signal: AbortSignal): Promise<string> => {
+    const previewUrl = new URL(attachment.downloadUrl, apiBaseUrl);
+    if (previewUrl.origin !== new URL(apiBaseUrl).origin) throw new Error("This image has an invalid location.");
+    const response = await fetch(previewUrl, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { "X-Workspace-Id": activeWorkspace.id },
+      signal
+    });
+    if (!response.ok) throw new Error("This image is unavailable or you no longer have access to it.");
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) throw new Error("This attachment is not a supported image.");
+    return URL.createObjectURL(blob);
+  }, [activeWorkspace.id, apiBaseUrl]);
 
   const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
     if (deletingMessageId) return;
@@ -500,15 +603,22 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
               </div>
             ) : (
               <ol aria-label="Channel messages" className="space-y-3">
-                {messageTimeline.map(({ message, startsNewDay }) => (
+                {messageTimeline.map(({ message, startsNewDay }) => message.type === "system" ? (
+                  <ChannelSystemMessageItem key={message.id} message={message} startsNewDay={startsNewDay} />
+                ) : (
                   <ChannelMessageItem
                     key={message.id}
+                    deliveryState={message.deliveryState}
+                    pendingFiles={message.pendingFiles}
+                    retryDisabled={isSending}
+                    onRetry={() => retryMessage(message.id)}
                     downloadingAttachmentId={downloadingAttachmentId}
                     isDownloadBusy={downloadingAttachmentId !== null}
                     canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
                     isDeleting={deletingMessageId !== null}
                     message={message}
                     onDownloadAttachment={downloadAttachment}
+                    loadImagePreview={loadImagePreview}
                     onDelete={(scope) => { void deleteMessage(message.id, scope); }}
                     startsNewDay={startsNewDay}
                   />

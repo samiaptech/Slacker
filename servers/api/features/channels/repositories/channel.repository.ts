@@ -1,8 +1,15 @@
-import { encodeChannelListCursor, type Channel, type ChannelListQuery, type ChannelMembership } from "../domain/index.js";
+import {
+  encodeChannelListCursor,
+  type Channel,
+  type ChannelListQuery,
+  type ChannelMembership,
+  type ChannelSystemEntry
+} from "../domain/index.js";
 import type {
   ChannelCreationRequestDocument,
   ChannelDocument,
-  ChannelMembershipDocument
+  ChannelMembershipDocument,
+  ChannelMessageDocument
 } from "../models/index.js";
 
 export type ChannelCreationRequest = ChannelCreationRequestDocument;
@@ -14,6 +21,13 @@ export type ChannelWriteTransaction = Readonly<{
   lockChannelForMembershipChange: (workspaceId: string, channelId: string) => Promise<ChannelDocument | null>;
   findMembership: (channelId: string, userId: string) => Promise<ChannelMembershipDocument | null>;
   deleteMembership: (channelId: string, userId: string) => Promise<void>;
+  insertChannelMessage: (document: ChannelMessageDocument) => Promise<void>;
+  findChannel?: (workspaceId: string, channelId: string) => Promise<ChannelDocument | null>;
+  updateChannelMetadata?: (
+    workspaceId: string,
+    channelId: string,
+    metadata: Readonly<Pick<ChannelDocument, "name" | "description" | "visibility" | "updatedAt">>
+  ) => Promise<ChannelDocument | null>;
 }>;
 
 export type JoinChannelResult =
@@ -23,9 +37,12 @@ export type JoinChannelResult =
   | Readonly<{ kind: "not-public" }>;
 
 export type LeaveChannelResult =
-  | Readonly<{ kind: "left" }>
+  | Readonly<{ kind: "left"; entry: ChannelSystemEntry }>
   | Readonly<{ kind: "already-left" }>
   | Readonly<{ kind: "channel-unavailable" }>;
+export type UpdateChannelResult =
+  | Readonly<{ kind: "updated"; channel: Channel }>
+  | Readonly<{ kind: "channel-unavailable" | "not-manager" }>;
 
 export type ChannelMembersResult =
   | Readonly<{ kind: "listed"; memberships: readonly ChannelMembership[]; canManage: boolean }>
@@ -87,7 +104,19 @@ export type ChannelRepository = Readonly<{
   addMember: (workspaceId: string, channelId: string, actorId: string, targetId: string, joinedAt: Date) => Promise<AddChannelMemberResult>;
   removeMember: (workspaceId: string, channelId: string, actorId: string, targetId: string) => Promise<RemoveChannelMemberResult>;
   joinPublicChannel: (workspaceId: string, channelId: string, userId: string, joinedAt: Date) => Promise<JoinChannelResult>;
-  leaveChannel: (workspaceId: string, channelId: string, userId: string) => Promise<LeaveChannelResult>;
+  leaveChannel: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    entry: ChannelSystemEntry
+  ) => Promise<LeaveChannelResult>;
+  updateChannel?: (
+    workspaceId: string,
+    channelId: string,
+    actorId: string,
+    metadata: Readonly<Pick<Channel, "name" | "description" | "visibility">>,
+    updatedAt: Date
+  ) => Promise<UpdateChannelResult>;
   findCreationRequest: (workspaceId: string, actorId: string, key: string) => Promise<ChannelCreationRequestDocument | null>;
 }>;
 
@@ -230,14 +259,43 @@ export const createChannelRepository = (storage: ChannelStorage): ChannelReposit
       await transaction.insertMembership(toMembershipDocument(membership));
       return Object.freeze({ kind: "joined", membership });
     }),
-  leaveChannel: (workspaceId, channelId, userId): Promise<LeaveChannelResult> =>
+  leaveChannel: (workspaceId, channelId, userId, entry): Promise<LeaveChannelResult> =>
     storage.withTransaction(async (transaction) => {
       const channel = await transaction.lockChannelForMembershipChange(workspaceId, channelId);
       if (!channel) return Object.freeze({ kind: "channel-unavailable" });
       const membership = await transaction.findMembership(channelId, userId);
       if (!membership) return Object.freeze({ kind: "already-left" });
       await transaction.deleteMembership(channelId, userId);
-      return Object.freeze({ kind: "left" });
+      await transaction.insertChannelMessage(Object.freeze({
+        _id: entry.id,
+        channelId: entry.channelId,
+        type: "system",
+        systemEvent: entry.systemEvent,
+        actorId: entry.actor.id,
+        actorName: entry.actor.name,
+        text: "",
+        createdAt: entry.createdAt,
+        leftAt: entry.createdAt
+      }));
+      return Object.freeze({ kind: "left", entry });
+    }),
+  updateChannel: (workspaceId, channelId, actorId, metadata, updatedAt): Promise<UpdateChannelResult> =>
+    storage.withTransaction(async (transaction) => {
+      if (!transaction.findChannel || !transaction.updateChannelMetadata) {
+        return Object.freeze({ kind: "channel-unavailable" });
+      }
+      const channel = await transaction.findChannel(workspaceId, channelId);
+      if (!channel) return Object.freeze({ kind: "channel-unavailable" });
+      const actor = await transaction.findMembership(channelId, actorId);
+      if (!actor) return Object.freeze({ kind: "channel-unavailable" });
+      if (actor.role !== "admin") return Object.freeze({ kind: "not-manager" });
+      const updated = await transaction.updateChannelMetadata(workspaceId, channelId, {
+        ...metadata,
+        updatedAt
+      });
+      return updated
+        ? Object.freeze({ kind: "updated", channel: toChannel(updated) })
+        : Object.freeze({ kind: "channel-unavailable" });
     }),
   findCreationRequest: storage.findCreationRequest
 });

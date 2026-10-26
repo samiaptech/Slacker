@@ -59,6 +59,7 @@ export type ChannelMessageResponse = Readonly<{
   id: string;
   channelId: string;
   senderId: string;
+  type?: "message";
   text: string;
   createdAt: string;
   attachments?: readonly ChatAttachmentResponse[];
@@ -69,7 +70,19 @@ export type ChannelMessageResponse = Readonly<{
   }>;
 }>;
 
+export type ChannelSystemEventResponse = Readonly<{
+  id: string;
+  channelId: string;
+  type: "system";
+  systemEvent: "member_left";
+  actor: Readonly<{ id: string; name: string }>;
+  text: "";
+  createdAt: string;
+}>;
+
+export type ChannelHistoryEntryResponse = ChannelMessageResponse | ChannelSystemEventResponse;
+
 export type ChannelMessageListResponse = Readonly<{
-  messages: readonly ChannelMessageResponse[];
+  messages: readonly ChannelHistoryEntryResponse[];
   nextCursor: string | null;
 }>;

@@ -4,11 +4,12 @@
   "description": "Primary Express API runtime.",
   "internalDependencies": ["eslint-config", "logging", "tsconfig", "types"],
   "externalDependencies": ["@better-auth/mongo-adapter", "@socket.io/mongo-adapter", "better-auth", "cloudinary", "dotenv", "express", "mongodb", "mongoose", "multer", "socket.io", "zod"],
-  "capabilities": ["http-api", "health", "google-sso", "workspace-access", "channels", "direct-messages", "message-search", "chat-attachments", "mongodb-integration", "socket-io-realtime"],
+  "capabilities": ["http-api", "health", "google-sso", "workspace-access", "channels", "direct-messages", "message-search", "notifications", "chat-attachments", "mongodb-integration", "socket-io-realtime"],
   "tasks": {
     "dev": { "command": "pnpm run dev", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"], "cache": false },
     "channels:initialize": { "command": "pnpm run channels:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
     "direct-messages:initialize": { "command": "pnpm run direct-messages:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
+    "notifications:initialize": { "command": "pnpm run notifications:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
     "workspaces:initialize": { "command": "pnpm run workspaces:initialize", "environment": ["API_HOST", "API_PORT", "WEB_ORIGIN", "MONGODB_URI", "BETTER_AUTH_URL", "BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "cache": false },
     "build:vercel": { "command": "pnpm run build:vercel", "outputs": ["vercel/server.mjs"], "cache": false },
     "build": { "command": "pnpm run build", "outputs": ["dist"], "cache": true },

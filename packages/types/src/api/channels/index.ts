@@ -7,6 +7,8 @@ export type {
   ChannelMembersResponse,
   ChannelMembershipResponse,
   ChannelResponse,
+  ChannelHistoryEntryResponse,
   ChannelMessageListResponse,
-  ChannelMessageResponse
+  ChannelMessageResponse,
+  ChannelSystemEventResponse
 } from "./channel-create-response.js";

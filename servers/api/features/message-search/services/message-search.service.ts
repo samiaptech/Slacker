@@ -9,6 +9,7 @@ import {
   normalizeMessageSearchQuery
 } from "../domain/index.js";
 import type { MessageSearchRepository } from "../repositories/index.js";
+import type { SharedRateLimiter } from "../../../integrations/mongodb/index.js";
 
 type SearchProfile = Readonly<{ id: string; name: string; image: string | null }>;
 
@@ -16,8 +17,8 @@ export type MessageSearchService = ReturnType<typeof createMessageSearchService>
 
 type MessageSearchServiceDependencies = Readonly<{
   repository: MessageSearchRepository;
+  rateLimiter: SharedRateLimiter;
   findUsersByIds: (userIds: readonly string[]) => Promise<readonly SearchProfile[]>;
-  now?: () => number;
 }>;
 
 const isSearchStorageUnavailable = (error: unknown): boolean =>
@@ -26,23 +27,9 @@ const isSearchStorageUnavailable = (error: unknown): boolean =>
 
 export const createMessageSearchService = ({
   repository,
-  findUsersByIds,
-  now = Date.now
+  rateLimiter,
+  findUsersByIds
 }: MessageSearchServiceDependencies) => {
-  const requestsByUser = new Map<string, number[]>();
-  let requestsSinceCleanup = 0;
-
-  const cleanExpiredRequests = (currentTime: number): void => {
-    requestsSinceCleanup += 1;
-    if (requestsSinceCleanup < 250) return;
-    requestsSinceCleanup = 0;
-    for (const [userId, timestamps] of requestsByUser) {
-      const active = timestamps.filter((timestamp) => currentTime - timestamp < MESSAGE_SEARCH_RATE_WINDOW_MS);
-      if (active.length === 0) requestsByUser.delete(userId);
-      else requestsByUser.set(userId, active);
-    }
-  };
-
   return Object.freeze({
     search: async (
       workspaceId: string,
@@ -60,17 +47,22 @@ export const createMessageSearchService = ({
       }
       const query = normalizeMessageSearchQuery(rawQuery);
       if (!query) return Object.freeze({ kind: "invalid" });
-      const currentTime = now();
-      cleanExpiredRequests(currentTime);
-      const activeRequests = (requestsByUser.get(userId) ?? [])
-        .filter((timestamp) => currentTime - timestamp < MESSAGE_SEARCH_RATE_WINDOW_MS);
-      if (activeRequests.length >= MESSAGE_SEARCH_RATE_LIMIT) {
-        const retryAfterSeconds = Math.max(1, Math.ceil(
-          (MESSAGE_SEARCH_RATE_WINDOW_MS - (currentTime - (activeRequests[0] ?? currentTime))) / 1_000
-        ));
-        return Object.freeze({ kind: "rate-limited", retryAfterSeconds });
+      let decision;
+      try {
+        decision = await rateLimiter.consume(
+          `message-search:${userId}`,
+          MESSAGE_SEARCH_RATE_LIMIT,
+          MESSAGE_SEARCH_RATE_WINDOW_MS
+        );
+      } catch {
+        return Object.freeze({ kind: "unavailable" });
       }
-      requestsByUser.set(userId, [...activeRequests, currentTime]);
+      if (!decision.allowed) {
+        return Object.freeze({
+          kind: "rate-limited",
+          retryAfterSeconds: decision.retryAfterSeconds
+        });
+      }
 
       try {
         const result = await repository.searchForMember(workspaceId, userId, query, page);

@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import Link from "next/link";
+import type { Route } from "next";
+import { ArrowLeft } from "lucide-react";
 import { workspaceMembersSchema } from "@/features/identity/public";
 import { channelMembersResponseSchema } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
@@ -16,6 +19,7 @@ type ChannelProfilePanelProps = Readonly<{
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   managementPanel?: ReactNode;
+  isPage?: boolean;
 }>;
 
 export const ChannelProfilePanel = ({
@@ -26,7 +30,8 @@ export const ChannelProfilePanel = ({
   visibility,
   isOpen,
   onOpenChange,
-  managementPanel
+  managementPanel,
+  isPage = false
 }: ChannelProfilePanelProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
   const realtime = useChannelRealtime();
@@ -136,15 +141,27 @@ export const ChannelProfilePanel = ({
 
   return (
     <>
-      {isOpen ? <aside aria-label={`About #${channelName}`} className="hidden min-h-0 w-80 shrink-0 flex-col overflow-y-auto border-l border-[#e8ece7] bg-[#f8f8f4] lg:flex" id="channel-profile-panel">
-        {profile}{management}
-      </aside> : null}
-      <details className="shrink-0 border-t border-[#e8ece7] bg-[#fbfaf8] p-3 lg:hidden" id="channel-profile-mobile" onToggle={(event) => onOpenChange(event.currentTarget.open)} open={isOpen}>
-        <summary className="cursor-pointer rounded-xl px-2 py-2 text-sm font-semibold text-[#355d4f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          About #{channelName} · {isLoading ? "Loading members…" : `${members?.members.length ?? 0} members`}
-        </summary>
-        <div className="max-h-80 space-y-3 overflow-y-auto pt-2">{profile}{management}</div>
-      </details>
+      {isPage ? (
+        <main aria-label={`About #${channelName}`} className="h-full min-h-0 overflow-y-auto bg-[#fbfaf8]">
+          <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-7 sm:py-6">
+            <Link
+              className="mb-4 inline-flex min-h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-[#416652] transition-colors hover:bg-[#e9f0e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={`/channels/${encodeURIComponent(channelId)}` as Route}
+              onClick={() => onOpenChange(false)}
+            >
+              <ArrowLeft aria-hidden="true" className="size-4" /> Back to conversation
+            </Link>
+            <div className="overflow-hidden rounded-2xl border border-[#e6e9e2] bg-white shadow-sm">
+              {profile}
+              <div className="px-4 pb-4 sm:px-5">{management}</div>
+            </div>
+          </div>
+        </main>
+      ) : isOpen ? (
+        <aside aria-label={`About #${channelName}`} className="hidden min-h-0 w-80 shrink-0 flex-col overflow-y-auto border-l border-[#e8ece7] bg-[#f8f8f4] lg:flex" id="channel-profile-panel">
+          {profile}{management}
+        </aside>
+      ) : null}
     </>
   );
 };

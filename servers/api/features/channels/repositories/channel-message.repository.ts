@@ -1,6 +1,7 @@
 import {
   encodeChannelMessageCursor,
   type ChannelMessage,
+  type ChannelHistoryEntry,
   type ChannelMessageDeleteScope,
   type ChannelMessagePageQuery
 } from "../domain/index.js";
@@ -54,7 +55,7 @@ export type ChannelMessageRepository = Readonly<{
     channelId: string,
     userId: string,
     query: ChannelMessagePageQuery
-  ) => Promise<Readonly<{ kind: "listed"; messages: readonly ChannelMessage[]; nextCursor: string | null }> | Readonly<{ kind: "channel-unavailable" }>>;
+  ) => Promise<Readonly<{ kind: "listed"; messages: readonly ChannelHistoryEntry[]; nextCursor: string | null }> | Readonly<{ kind: "channel-unavailable" }>>;
   createForMember: (
     workspaceId: string,
     channelId: string,
@@ -65,16 +66,31 @@ export type ChannelMessageRepository = Readonly<{
   findAttachmentForMember?: ChannelMessageStorage["findAttachmentForMember"];
 }>;
 
-const toChannelMessage = (document: ChannelMessageDocument): ChannelMessage => Object.freeze({
-  id: document._id,
-  channelId: document.channelId,
-  senderId: document.senderId,
-  text: document.text,
-  createdAt: document.createdAt,
-  ...(document.attachments && document.attachments.length > 0
-    ? { attachments: document.attachments }
-    : {})
-});
+const toChannelMessage = (document: ChannelMessageDocument): ChannelHistoryEntry => {
+  if (document.type === "system" && document.systemEvent === "member_left"
+    && document.actorId && document.actorName && document.leftAt) {
+    return Object.freeze({
+      id: document._id,
+      channelId: document.channelId,
+      type: "system",
+      systemEvent: "member_left",
+      actor: Object.freeze({ id: document.actorId, name: document.actorName }),
+      text: "",
+      createdAt: document.leftAt
+    });
+  }
+  if (!document.senderId) throw new Error("A channel message is missing its sender.");
+  return Object.freeze({
+    id: document._id,
+    channelId: document.channelId,
+    senderId: document.senderId,
+    text: document.text,
+    createdAt: document.createdAt,
+    ...(document.attachments && document.attachments.length > 0
+      ? { attachments: document.attachments }
+      : {})
+  });
+};
 
 const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => Object.freeze({
   _id: message.id,
@@ -82,6 +98,7 @@ const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => O
   senderId: message.senderId,
   text: message.text,
   createdAt: message.createdAt,
+  type: "message",
   ...(message.attachments && message.attachments.length > 0
     ? { attachments: message.attachments }
     : {})

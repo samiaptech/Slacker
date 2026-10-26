@@ -6,6 +6,7 @@ export type {
   ChannelCreationRequest,
   ChannelMembersResult,
   RemoveChannelMemberResult,
+  UpdateChannelResult,
   ChannelDuplicateConstraint,
   ChannelDuplicateKeyError,
   ChannelRepository,

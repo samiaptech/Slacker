@@ -17,6 +17,7 @@ import {
 } from "../controllers/index.js";
 import type { DirectMessageService } from "../services/index.js";
 import type { DirectMessageRealtimePublisher } from "../realtime/index.js";
+import type { NotificationService } from "../../notifications/public/index.js";
 
 type DirectMessageIdentity = Readonly<{ id: string; name: string; email: string; image: string | null }>;
 type DirectWorkspaceAccessResult =
@@ -34,6 +35,7 @@ export type DirectMessageRouteDependencies = Readonly<{
   service: DirectMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
   realtime?: DirectMessageRealtimePublisher;
+  notifications?: NotificationService;
 }>;
 
 const uploadParser = multer({
@@ -65,26 +67,30 @@ const parseMessageAttachments: RequestHandler = (request, response, next) => {
 
 export const createDirectMessageRoutes = (dependencies: DirectMessageRouteDependencies): ExpressRouter => {
   const router = Router();
-  router.get("/direct-messages", createListDirectMessagesController(dependencies));
-  router.post("/direct-messages", createOpenDirectMessageController(dependencies));
-  router.get("/direct-messages/:conversationId", createGetDirectMessageController(dependencies));
+  const controllerDependencies = {
+    ...dependencies,
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
+  };
+  router.get("/direct-messages", createListDirectMessagesController(controllerDependencies));
+  router.post("/direct-messages", createOpenDirectMessageController(controllerDependencies));
+  router.get("/direct-messages/:conversationId", createGetDirectMessageController(controllerDependencies));
   router.get(
     "/direct-messages/:conversationId/messages",
-    createListDirectMessageHistoryController(dependencies)
+    createListDirectMessageHistoryController(controllerDependencies)
   );
   router.post(
     "/direct-messages/:conversationId/messages",
-    createAuthorizeDirectMessageUploadController(dependencies),
+    createAuthorizeDirectMessageUploadController(controllerDependencies),
     parseMessageAttachments,
-    createSendDirectMessageController(dependencies)
+    createSendDirectMessageController(controllerDependencies)
   );
   router.delete(
     "/direct-messages/:conversationId/messages/:messageId",
-    createDeleteDirectMessageController(dependencies)
+    createDeleteDirectMessageController(controllerDependencies)
   );
   router.get(
     "/direct-messages/:conversationId/messages/:messageId/attachments/:attachmentId",
-    createDownloadDirectMessageAttachmentController(dependencies)
+    createDownloadDirectMessageAttachmentController(controllerDependencies)
   );
   return router;
 };

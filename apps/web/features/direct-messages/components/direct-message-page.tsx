@@ -17,8 +17,13 @@ import {
   captureHistoryScrollAnchor,
   getMessageDeleteFailure,
   restoreHistoryScrollAnchor,
+  findMatchingPendingMessageId,
+  removePendingMessage,
+  updatePendingMessage,
   type HistoryScrollAnchor,
-  type MessageDeleteScope
+  type MessageAttachment,
+  type MessageDeleteScope,
+  type MessageWithDelivery
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -27,21 +32,30 @@ const DIRECT_MESSAGE_MAX_LENGTH = 4_000;
 const MAX_ATTACHMENT_COUNT = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.csv,.md";
+type DirectTimelineMessage = MessageWithDelivery<DirectMessageView>;
 
 const formatFileSize = (size: number): string => size < 1024 * 1024
   ? `${Math.max(1, Math.round(size / 1024))} KB`
   : `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
 const mergeMessages = (
-  current: readonly DirectMessageView[],
-  incoming: readonly DirectMessageView[]
-): readonly DirectMessageView[] => {
+  current: readonly DirectTimelineMessage[],
+  incoming: readonly DirectTimelineMessage[]
+): readonly DirectTimelineMessage[] => {
   const byId = new Map(current.map((message) => [message.id, message]));
   incoming.forEach((message) => byId.set(message.id, message));
   return [...byId.values()].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   );
 };
+
+const mergeIncomingMessages = (
+  current: readonly DirectTimelineMessage[],
+  incoming: readonly DirectMessageView[]
+): readonly DirectTimelineMessage[] => incoming.reduce((messages, message) => {
+  const pendingId = findMatchingPendingMessageId(messages, message);
+  return mergeMessages(pendingId ? removePendingMessage(messages, pendingId) : messages, [message]);
+}, current);
 
 type DirectMessagePageProps = Readonly<{ apiBaseUrl: string; conversationId: string }>;
 
@@ -50,7 +64,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
   const realtime = useChannelRealtime();
   const [conversation, setConversation] = useState<ReturnType<typeof directConversationResponseSchema.parse>["conversation"] | null>(null);
   const [loadedConversationId, setLoadedConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<readonly DirectMessageView[]>([]);
+  const [messages, setMessages] = useState<readonly DirectTimelineMessage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<readonly File[]>([]);
@@ -119,7 +133,10 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
         const parsedMessages = directMessageListResponseSchema.safeParse(messagesBody);
         if (!parsedMessages.success) throw new Error("The server returned invalid direct-message history.");
         setConversation(parsedConversation.data.conversation);
-        setMessages(parsedMessages.data.messages);
+        setMessages((current) => mergeIncomingMessages(
+          current.filter((message) => message.deliveryState && message.conversationId === conversationId),
+          parsedMessages.data.messages
+        ));
         setNextCursor(parsedMessages.data.nextCursor);
         setLoadedConversationId(conversationId);
         shouldScrollRef.current = true;
@@ -152,7 +169,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     const onMessage = (message: DirectMessageView): void => {
       if (message.conversationId !== conversationId) return;
       shouldScrollRef.current = true;
-      setMessages((current) => mergeMessages(current, [message]));
+      setMessages((current) => mergeIncomingMessages(current, [message]));
     };
     const onMessageDeleted = (change: Readonly<{ conversationId: string; messageId: string }>): void => {
       if (change.conversationId !== conversationId) return;
@@ -224,22 +241,22 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     }
   };
 
-  const send = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    if ((!draft.trim() && selectedFiles.length === 0) || isSending) return;
+  const submitMessage = async (pending: DirectTimelineMessage): Promise<void> => {
     setIsSending(true);
     setSendError(null);
+    setMessages((current) => updatePendingMessage(current, pending.id, "sending"));
     try {
       const headers: Record<string, string> = { "X-Workspace-Id": activeWorkspace.id };
       let body: BodyInit;
-      if (selectedFiles.length > 0) {
+      const files = pending.pendingFiles ?? [];
+      if (files.length > 0) {
         const formData = new FormData();
-        if (draft.trim()) formData.set("text", draft);
-        selectedFiles.forEach((file) => formData.append("files", file));
+        if (pending.text.trim()) formData.set("text", pending.text);
+        files.forEach((file) => formData.append("files", file));
         body = formData;
       } else {
         headers["Content-Type"] = "application/json";
-        body = JSON.stringify({ text: draft });
+        body = JSON.stringify({ text: pending.text });
       }
       const response = await fetch(new URL(`/direct-messages/${encodeURIComponent(conversationId)}/messages`, apiBaseUrl), {
         method: "POST",
@@ -253,20 +270,48 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
         : "Your message could not be sent. Check your access and try again.");
       const parsed = directMessageResponseSchema.safeParse(await response.json());
       if (!parsed.success) throw new Error("The server returned an invalid sent-message response.");
-      setMessages((current) => mergeMessages(current, [parsed.data]));
-      setDraft("");
-      setSelectedFiles([]);
+      setMessages((current) => mergeIncomingMessages(removePendingMessage(current, pending.id), [parsed.data]));
       setAttachmentError(null);
-      if (isTypingRef.current) {
-        isTypingRef.current = false;
-        realtime.socket?.emit("direct-message:typing", { conversationId, active: false });
-      }
       shouldScrollRef.current = true;
     } catch (error: unknown) {
       setSendError(error instanceof Error ? error.message : "Your message could not be sent.");
+      setMessages((current) => updatePendingMessage(current, pending.id, "failed"));
     } finally {
       setIsSending(false);
     }
+  };
+
+  const send = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const text = draft;
+    const files = selectedFiles;
+    if ((!text.trim() && files.length === 0) || isSending) return;
+    const pending: DirectTimelineMessage = {
+      id: `pending-${crypto.randomUUID()}`,
+      conversationId,
+      senderId: currentUser.id,
+      text,
+      createdAt: new Date().toISOString(),
+      attachments: [],
+      sender: { id: currentUser.id, name: currentUser.name, image: currentUser.image },
+      deliveryState: "sending",
+      pendingFiles: files
+    };
+    shouldScrollRef.current = true;
+    setMessages((current) => mergeMessages(current, [pending]));
+    setDraft("");
+    setSelectedFiles([]);
+    setSendError(null);
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      realtime.socket?.emit("direct-message:typing", { conversationId, active: false });
+    }
+    void submitMessage(pending);
+  };
+
+  const retryMessage = (messageId: string): void => {
+    const pending = messages.find((message) => message.id === messageId && message.deliveryState === "failed");
+    if (pending && !isSending) void submitMessage(pending);
   };
 
   const addAttachments = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -315,6 +360,21 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       setDownloadingAttachmentId(null);
     }
   }, [activeWorkspace.id, apiBaseUrl, downloadingAttachmentId]);
+
+  const loadImagePreview = useCallback(async (attachment: MessageAttachment, signal: AbortSignal): Promise<string> => {
+    const previewUrl = new URL(attachment.downloadUrl, apiBaseUrl);
+    if (previewUrl.origin !== new URL(apiBaseUrl).origin) throw new Error("This image has an invalid location.");
+    const response = await fetch(previewUrl, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { "X-Workspace-Id": activeWorkspace.id },
+      signal
+    });
+    if (!response.ok) throw new Error("This image is unavailable or you no longer have access to it.");
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) throw new Error("This attachment is not a supported image.");
+    return URL.createObjectURL(blob);
+  }, [activeWorkspace.id, apiBaseUrl]);
 
   const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
     if (deletingMessageId) return;
@@ -436,12 +496,17 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                   {messageTimeline.map(({ message, startsNewDay }) => (
                     <DirectMessageItem
                       key={message.id}
+                      deliveryState={message.deliveryState}
+                      pendingFiles={message.pendingFiles}
+                      retryDisabled={isSending}
+                      onRetry={() => retryMessage(message.id)}
                       downloadingAttachmentId={downloadingAttachmentId}
                       isDownloadBusy={downloadingAttachmentId !== null}
                       canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
                       isDeleting={deletingMessageId !== null}
                       message={message}
                       onDownloadAttachment={downloadAttachment}
+                      loadImagePreview={loadImagePreview}
                       onDelete={(scope) => { void deleteMessage(message.id, scope); }}
                       startsNewDay={startsNewDay}
                     />

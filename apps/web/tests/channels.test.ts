@@ -94,7 +94,7 @@ void test("validates channel message pages and rejects email fields from sender 
   assert.deepEqual(channelMessageListResponseSchema.parse({
     messages: [message],
     nextCursor: "opaque-cursor"
-  }).messages[0], { ...message, attachments: [] });
+  }).messages[0], { ...message, type: "message", attachments: [] });
   assert.equal(channelMessageListResponseSchema.safeParse({
     messages: [{ ...message, sender: { ...message.sender, email: "private@example.test" } }],
     nextCursor: null

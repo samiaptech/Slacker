@@ -8,6 +8,7 @@ import {
   type MessageSearchCandidate,
   type MessageSearchStorage
 } from "../index.js";
+import type { SharedRateLimiter } from "../../../integrations/mongodb/index.js";
 
 const candidates: readonly MessageSearchCandidate[] = Object.freeze([
   Object.freeze({
@@ -30,7 +31,9 @@ const candidates: readonly MessageSearchCandidate[] = Object.freeze([
 
 const createService = (
   overrides: Partial<MessageSearchStorage> = {},
-  now: () => number = () => 1_000
+  rateLimiter: SharedRateLimiter = {
+    consume: () => Promise.resolve({ allowed: true, retryAfterSeconds: 0 })
+  }
 ) => {
   const calls: Readonly<Record<string, unknown>>[] = [];
   const storage: MessageSearchStorage = {
@@ -46,14 +49,34 @@ const createService = (
   };
   const service = createMessageSearchService({
     repository: createMessageSearchRepository(storage),
+    rateLimiter,
     findUsersByIds: (ids) => Promise.resolve(ids.map((id) => ({
       id,
       name: id === "peer" ? "Direct Teammate" : "Channel Teammate",
       image: null
-    }))),
-    now
+    })))
   });
   return { service, calls };
+};
+
+const createRollingLimiter = (now: () => number): SharedRateLimiter => {
+  const eventsByKey = new Map<string, number[]>();
+  return {
+    consume: (key, limit, windowMs) => {
+      const currentTime = now();
+      const cutoff = currentTime - windowMs;
+      const activeEvents = (eventsByKey.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
+      if (activeEvents.length >= limit) {
+        const oldestEvent = Math.min(...activeEvents);
+        return Promise.resolve({
+          allowed: false,
+          retryAfterSeconds: Math.max(1, Math.ceil((oldestEvent + windowMs - currentTime) / 1_000))
+        });
+      }
+      eventsByKey.set(key, [...activeEvents, currentTime]);
+      return Promise.resolve({ allowed: true, retryAfterSeconds: 0 });
+    }
+  };
 };
 
 void test("normalizes plain-text queries and makes snippets safely bounded", () => {
@@ -97,7 +120,7 @@ void test("rejects invalid queries and page bounds before querying storage", asy
 
 void test("limits each member to 30 searches per rolling minute without recording query text", async () => {
   let currentTime = 1_000;
-  const { service, calls } = createService({}, () => currentTime);
+  const { service, calls } = createService({}, createRollingLimiter(() => currentTime));
   for (let index = 0; index < 30; index += 1) {
     assert.equal((await service.search("workspace-1", "user-1", `roadmap ${String(index)}`, 1)).kind, "listed");
   }
@@ -110,10 +133,36 @@ void test("limits each member to 30 searches per rolling minute without recordin
   assert.equal(calls.length, 31);
 });
 
+void test("shares the 30-search quota across independent service instances by user", async () => {
+  let currentTime = 1_000;
+  const rateLimiter = createRollingLimiter(() => currentTime);
+  const first = createService({}, rateLimiter).service;
+  const second = createService({}, rateLimiter).service;
+  for (let index = 0; index < 30; index += 1) {
+    const service = index % 2 === 0 ? first : second;
+    assert.equal((await service.search("workspace-1", "user-1", "roadmap", 1)).kind, "listed");
+  }
+  assert.deepEqual(await second.search("workspace-1", "user-1", "roadmap", 1), {
+    kind: "rate-limited",
+    retryAfterSeconds: 60
+  });
+  assert.equal((await second.search("workspace-1", "user-2", "roadmap", 1)).kind, "listed");
+  currentTime += 60_001;
+  assert.equal((await first.search("workspace-1", "user-1", "roadmap", 1)).kind, "listed");
+});
+
 void test("surfaces unavailable search storage instead of returning empty results", async () => {
   const error = Object.assign(new Error("text index missing"), { kind: "message-search-storage-unavailable" });
   const { service } = createService({
     searchForMember: () => Promise.reject(error)
   });
   assert.deepEqual(await service.search("workspace-1", "user-1", "roadmap", 1), { kind: "unavailable" });
+});
+
+void test("fails search closed when shared rate-limit storage is unavailable", async () => {
+  const { service, calls } = createService({}, {
+    consume: () => Promise.reject(new Error("MongoDB unavailable"))
+  });
+  assert.deepEqual(await service.search("workspace-1", "user-1", "roadmap", 1), { kind: "unavailable" });
+  assert.equal(calls.length, 0);
 });

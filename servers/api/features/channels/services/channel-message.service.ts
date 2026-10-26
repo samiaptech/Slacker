@@ -73,12 +73,15 @@ export const createChannelMessageService = ({
     try {
       const result = await repository.findForMember(workspaceId, channelId, userId, query);
       if (result.kind !== "listed") return result;
-      const profiles = await findUsersByIds([...new Set(result.messages.map(({ senderId }) => senderId))]);
+      const profiles = await findUsersByIds([...new Set(result.messages.flatMap((message) =>
+        "senderId" in message ? [message.senderId] : []
+      ))]);
       const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
       return Object.freeze({
         kind: "listed",
         nextCursor: result.nextCursor,
         messages: Object.freeze(result.messages.map((message) => {
+          if (!("senderId" in message)) return message as unknown as ChannelMessageWithSender;
           const profile = profilesById.get(message.senderId);
           return Object.freeze({
             ...message,

@@ -18,5 +18,7 @@ export const ERROR_MESSAGES = Object.freeze({
   messageDeleteForbidden: "Only the message author or a workspace administrator can delete for everyone.",
   messageDeleteCleanupFailed: "The message was deleted, but one or more attached files could not be cleaned up.",
   messageSearchUnavailable: "Message search is temporarily unavailable.",
-  rateLimited: "Search request limit reached. Wait before searching again."
+  rateLimited: "Search request limit reached. Wait before searching again.",
+  apiRateLimited: "API request limit reached. Wait before trying again.",
+  rateLimitUnavailable: "Request protection is temporarily unavailable."
 } as const);

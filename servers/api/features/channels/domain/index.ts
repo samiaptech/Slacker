@@ -48,6 +48,8 @@ export {
 } from "./channel-messages.js";
 export type {
   ChannelMessage,
+  ChannelHistoryEntry,
+  ChannelSystemEntry,
   ChannelMessageCursor,
   ChannelMessageCursorDecodeResult,
   ChannelMessageDeleteScope,

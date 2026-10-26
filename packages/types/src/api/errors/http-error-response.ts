@@ -16,7 +16,9 @@ export type ApiErrorCode =
   | "message_delete_forbidden"
   | "message_delete_cleanup_failed"
   | "message_search_unavailable"
-  | "rate_limited";
+  | "rate_limited"
+  | "api_rate_limited"
+  | "rate_limit_unavailable";
 
 export type ApiErrorDetails = Readonly<Record<string, unknown>> | readonly unknown[];
 

@@ -21,4 +21,4 @@ export {
   channelMessageListResponseSchema,
   channelMessageResponseSchema
 } from "./channel-message-response";
-export type { ChannelMessageListView, ChannelMessageView } from "./channel-message-response";
+export type { ChannelHistoryEntryView, ChannelMessageListView, ChannelMessageView } from "./channel-message-response";

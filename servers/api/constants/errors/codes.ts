@@ -18,5 +18,7 @@ export const ERROR_CODES = Object.freeze({
   messageDeleteForbidden: "message_delete_forbidden",
   messageDeleteCleanupFailed: "message_delete_cleanup_failed",
   messageSearchUnavailable: "message_search_unavailable",
-  rateLimited: "rate_limited"
+  rateLimited: "rate_limited",
+  apiRateLimited: "api_rate_limited",
+  rateLimitUnavailable: "rate_limit_unavailable"
 } as const satisfies Readonly<Record<string, ApiErrorCode>>);

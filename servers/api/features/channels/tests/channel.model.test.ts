@@ -48,7 +48,7 @@ void test("the unique index scopes canonical active names by workspace and permi
 
 void test("channel messages allow bounded text or attachments and preserve chronology indexing", () => {
   assert.deepEqual(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.required, [
-    "_id", "channelId", "senderId", "text", "createdAt"
+    "_id", "channelId", "text", "createdAt"
   ]);
   assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.additionalProperties, false);
   assert.deepEqual(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.properties.text, {
@@ -57,7 +57,7 @@ void test("channel messages allow bounded text or attachments and preserve chron
     maxLength: 4000
   });
   assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.properties.attachments.maxItems, 5);
-  assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.anyOf[1]?.required[0], "attachments");
+  assert.equal(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.oneOf[0]?.required[0], "senderId");
   assert.deepEqual(CHANNEL_MESSAGES_INDEXES, [
     {
       keys: { channelId: 1, createdAt: -1, _id: -1 },

@@ -7,7 +7,7 @@ import { createMessageSearchRoutes } from "../routes/index.js";
 
 const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
-const startSearchApi = async () => {
+const startSearchApi = async (rateLimited = false) => {
   const calls: Readonly<Record<string, unknown>>[] = [];
   const app = express();
   app.use(express.json());
@@ -27,7 +27,12 @@ const startSearchApi = async () => {
     service: {
     search: (workspaceId, userId, query, page) => {
         calls.push({ workspaceId, userId, query, page });
-      return Promise.resolve({
+      return Promise.resolve(rateLimited
+        ? {
+          kind: "rate-limited" as const,
+          retryAfterSeconds: 60
+        }
+        : {
           kind: "listed" as const,
           response: {
             query,
@@ -76,6 +81,33 @@ void test("search requires authenticated workspace access and uses a private POS
       userId: "member-1",
       query: "roadmap decision",
       page: 1
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      api.server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+});
+
+void test("preserves the search-specific 429 response and Retry-After header", async () => {
+  const api = await startSearchApi(true);
+  try {
+    const response = await fetch(api.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Workspace-Id": "workspace-1", "X-Test-Identity": "member" },
+      body: JSON.stringify({ query: "roadmap decision" })
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("retry-after"), "60");
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "rate_limited",
+        message: "Search request limit reached. Wait before searching again.",
+        details: { retryAfterSeconds: 60 }
+      }
     });
   } finally {
     await new Promise<void>((resolve, reject) => {

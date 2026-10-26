@@ -13,7 +13,7 @@ type TestSocket = Socket<RealtimeServerEvents, RealtimeClientEvents>;
 const createTestSocket = (origin: string, identity: string): TestSocket =>
   createClient(origin, {
     autoConnect: false,
-    extraHeaders: { Cookie: `session=${identity}` },
+    extraHeaders: { Cookie: `session=${identity}`, Origin: "http://localhost:3000" },
     reconnection: false,
     transports: ["websocket"],
     timeout: 2_000
@@ -232,6 +232,7 @@ void test("rejects Socket.IO connections without an authenticated session", asyn
   if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
   const client = createClient(`http://127.0.0.1:${address.port.toString()}`, {
     autoConnect: false,
+    extraHeaders: { Origin: "http://localhost:3000" },
     reconnection: false,
     timeout: 2_000
   });
@@ -241,6 +242,240 @@ void test("rejects Socket.IO connections without an authenticated session", asyn
     assert.match((await rejected).message, /Authentication required/);
   } finally {
     client.disconnect();
+    await socketIo.close();
+  }
+});
+
+void test("rejects socket handshakes with a missing or untrusted origin", async () => {
+  const logger: Logger = {
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined
+  };
+  const httpServer = createServer();
+  const socketIo = createSocketIoIntegration({
+    webOrigin: "http://localhost:3000",
+    logger,
+    getIdentity: () => Promise.resolve({
+      id: "session-user",
+      name: "Session User",
+      email: "session@example.test",
+      image: null
+    })
+  });
+  socketIo.attach(httpServer);
+  httpServer.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("listening", resolve);
+    httpServer.once("error", reject);
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
+  const origin = `http://127.0.0.1:${address.port.toString()}`;
+  const missingOrigin = createClient(origin, {
+    autoConnect: false,
+    reconnection: false,
+    transports: ["websocket"],
+    timeout: 2_000
+  });
+  const untrustedOrigin = createClient(origin, {
+    autoConnect: false,
+    extraHeaders: { Origin: "https://attacker.example" },
+    reconnection: false,
+    transports: ["websocket"],
+    timeout: 2_000
+  });
+  try {
+    for (const client of [missingOrigin, untrustedOrigin]) {
+      const rejected = new Promise<Error>((resolve) => client.once("connect_error", resolve));
+      client.connect();
+      assert.match((await rejected).message, /Realtime origin is not allowed/);
+    }
+  } finally {
+    missingOrigin.disconnect();
+    untrustedOrigin.disconnect();
+    await socketIo.close();
+  }
+});
+
+void test("disconnects an established socket after its Better Auth session becomes invalid", async () => {
+  const logger: Logger = {
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined
+  };
+  let sessionValid = true;
+  const httpServer = createServer();
+  const socketIo = createSocketIoIntegration({
+    webOrigin: "http://localhost:3000",
+    logger,
+    sessionRevalidationIntervalMs: 20,
+    getIdentity: () => Promise.resolve(sessionValid ? {
+      id: "session-user",
+      name: "Session User",
+      email: "session@example.test",
+      image: null
+    } : null)
+  });
+  socketIo.attach(httpServer);
+  httpServer.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("listening", resolve);
+    httpServer.once("error", reject);
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
+  const client = createClient(`http://127.0.0.1:${address.port.toString()}`, {
+    autoConnect: false,
+    extraHeaders: { Cookie: "session=valid", Origin: "http://localhost:3000" },
+    reconnection: false,
+    transports: ["websocket"],
+    timeout: 2_000
+  });
+  try {
+    const connected = waitForConnect(client);
+    client.connect();
+    await connected;
+    sessionValid = false;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Invalid session socket was not disconnected."));
+      }, 1_000);
+      client.once("disconnect", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  } finally {
+    client.disconnect();
+    await socketIo.close();
+  }
+});
+
+void test("limits concurrent sockets per user and client IP", async () => {
+  const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+  const httpServer = createServer();
+  const socketIo = createSocketIoIntegration({
+    webOrigin: "http://localhost:3000",
+    logger,
+    limits: { connectionsPerUser: 1, connectionsPerIp: 2 },
+    getIdentity: (headers) => {
+      const cookie = headers.cookie;
+      const userId = typeof cookie === "string" ? cookie.replace("session=", "") : "";
+      return Promise.resolve({
+        id: userId,
+        name: userId,
+        email: `${userId}@example.test`,
+        image: null
+      });
+    }
+  });
+  socketIo.attach(httpServer);
+  httpServer.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("listening", resolve);
+    httpServer.once("error", reject);
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
+  const origin = `http://127.0.0.1:${address.port.toString()}`;
+  const createLimitedClient = (userId: string): TestSocket => createClient(origin, {
+    autoConnect: false,
+    extraHeaders: { Cookie: `session=${userId}`, Origin: "http://localhost:3000" },
+    reconnection: false,
+    transports: ["websocket"],
+    timeout: 2_000
+  });
+  const first = createLimitedClient("same-user");
+  const duplicateUser = createLimitedClient("same-user");
+  const otherUser = createLimitedClient("other-user");
+  const overIpLimit = createLimitedClient("third-user");
+  try {
+    const firstConnected = waitForConnect(first);
+    first.connect();
+    await firstConnected;
+
+    const userRejected = new Promise<Error>((resolve) => duplicateUser.once("connect_error", resolve));
+    duplicateUser.connect();
+    assert.match((await userRejected).message, /connection limit reached/i);
+
+    const otherConnected = waitForConnect(otherUser);
+    otherUser.connect();
+    await otherConnected;
+
+    const ipRejected = new Promise<Error>((resolve) => overIpLimit.once("connect_error", resolve));
+    overIpLimit.connect();
+    assert.match((await ipRejected).message, /connection limit reached/i);
+  } finally {
+    first.disconnect();
+    duplicateUser.disconnect();
+    otherUser.disconnect();
+    overIpLimit.disconnect();
+    await socketIo.close();
+  }
+});
+
+void test("disconnects users who exceed the inbound event rate and bounds Socket.IO packets", async () => {
+  const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+  const httpServer = createServer();
+  const socketIo = createSocketIoIntegration({
+    webOrigin: "http://localhost:3000",
+    logger,
+    limits: { eventsPerUserPerSecond: 2 },
+    getIdentity: () => Promise.resolve({
+      id: "event-user",
+      name: "Event User",
+      email: "event@example.test",
+      image: null
+    })
+  });
+  socketIo.attach(httpServer);
+  httpServer.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("listening", resolve);
+    httpServer.once("error", reject);
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("Socket test server did not bind to a TCP port.");
+  assert.equal(socketIo.io.engine.opts.maxHttpBufferSize, 16 * 1024);
+  const origin = `http://127.0.0.1:${address.port.toString()}`;
+  const client = createTestSocket(origin, "event-user");
+  const oversizedClient = createTestSocket(origin, "event-user");
+  try {
+    const connected = waitForConnect(client);
+    client.connect();
+    await connected;
+    const disconnected = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Event-flooded socket was not disconnected."));
+      }, 1_000);
+      client.once("disconnect", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    client.emit("workspace:subscribe", "workspace-1");
+    client.emit("workspace:subscribe", "workspace-1");
+    client.emit("workspace:subscribe", "workspace-1");
+    await disconnected;
+
+    const oversizedConnected = waitForConnect(oversizedClient);
+    oversizedClient.connect();
+    await oversizedConnected;
+    const oversizedDisconnected = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Oversized socket payload was not rejected."));
+      }, 1_000);
+      oversizedClient.once("disconnect", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    oversizedClient.emit("workspace:subscribe", "x".repeat(20 * 1024));
+    await oversizedDisconnected;
+  } finally {
+    client.disconnect();
+    oversizedClient.disconnect();
     await socketIo.close();
   }
 });

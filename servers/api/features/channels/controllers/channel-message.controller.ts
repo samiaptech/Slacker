@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import type { ChannelMessageListResponse, ChannelMessageResponse } from "@workspace/types";
+import type { ChannelMessageResponse } from "@workspace/types";
 import { z } from "zod";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
 import { createApplicationError } from "../../../errors/index.js";
@@ -15,13 +15,16 @@ import {
 } from "../domain/index.js";
 import type { ChannelMessageService } from "../services/index.js";
 import type { ChannelMessageWithSender } from "../services/index.js";
+import type { ChannelSystemEntry } from "../domain/index.js";
 import type { ChannelRealtimePublisher } from "../realtime/index.js";
+import { isNotificationStorageUnavailable, type NotificationService } from "../../notifications/public/index.js";
 import { resolveChannelMemberAccess, sendChannelAccessError, type ChannelAccessDependencies } from "./channel.controller.js";
 
 type ChannelMessageControllerDependencies = ChannelAccessDependencies & Readonly<{
   service: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
   realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageDeleted">;
+  notifications?: Pick<NotificationService, "notifyChannelMessage" | "markResourceRead">;
 }>;
 
 const querySchema = z.object({
@@ -35,12 +38,36 @@ const messageBodySchema = z.object({
 }).strict();
 const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
 
-const toMessageResponse = (message: ChannelMessageWithSender): ChannelMessageResponse => {
+type SystemEntryResponse = Readonly<{
+  id: string;
+  channelId: string;
+  type: "system";
+  systemEvent: "member_left";
+  actor: Readonly<{ id: string; name: string }>;
+  text: "";
+  createdAt: string;
+}>;
+
+const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageResponse & Readonly<{ type: "message" }>) | SystemEntryResponse => {
+  if ((message as unknown as { type?: string }).type === "system") {
+    const entry = message as unknown as ChannelSystemEntry;
+    return {
+      id: entry.id,
+      channelId: entry.channelId,
+      type: "system",
+      systemEvent: entry.systemEvent,
+      actor: entry.actor,
+      text: "",
+      createdAt: entry.createdAt.toISOString()
+    };
+  }
+  if (!("sender" in message)) throw new Error("A channel history message is missing sender metadata.");
   const attachments = message.attachments ?? [];
   return {
     id: message.id,
     channelId: message.channelId,
     senderId: message.senderId,
+    type: "message",
     text: message.text,
     createdAt: message.createdAt.toISOString(),
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({
@@ -65,12 +92,19 @@ const messageStorageError = () => createApplicationError({
   message: ERROR_MESSAGES.channelStorageUnavailable,
   status: HTTP_STATUS.serviceUnavailable
 });
+const notificationStorageError = () => createApplicationError({
+  code: ERROR_CODES.internal,
+  message: "Notifications are temporarily unavailable.",
+  status: HTTP_STATUS.serviceUnavailable
+});
+const normalizeNotificationFailure = (error: unknown): unknown =>
+  isNotificationStorageUnavailable(error) ? notificationStorageError() : error;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 export const createListChannelMessagesController = (
-  { getIdentity, getWorkspaceAccess, service }: ChannelMessageControllerDependencies
+  { getIdentity, getWorkspaceAccess, service, notifications }: ChannelMessageControllerDependencies
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -105,14 +139,18 @@ export const createListChannelMessagesController = (
       next(result.kind === "unavailable" ? messageStorageError() : channelUnavailableError());
       return;
     }
-    const body: ChannelMessageListResponse = {
+    await notifications?.markResourceRead(access.access.user.id, {
+      type: "channel",
+      id: channelId
+    });
+    const body = {
       messages: result.messages.map(toMessageResponse),
       nextCursor: result.nextCursor
     };
 
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -178,7 +216,7 @@ export const createDeleteChannelMessageController = (
     }
     response.status(HTTP_STATUS.noContent).end();
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -212,12 +250,12 @@ export const createAuthorizeChannelMessageUploadController = (
     }
     next();
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
 export const createSendChannelMessageController = (
-  { getIdentity, getWorkspaceAccess, service, realtime }: ChannelMessageControllerDependencies
+  { getIdentity, getWorkspaceAccess, service, realtime, notifications }: ChannelMessageControllerDependencies
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -314,10 +352,22 @@ export const createSendChannelMessageController = (
       return;
     }
     const message = toMessageResponse(result.message);
-    realtime?.publishMessage(access.access.workspace.id, channelId, message);
+    await notifications?.notifyChannelMessage({
+      workspaceId: access.access.workspace.id,
+      channelId,
+      messageId: result.message.id,
+      actor: { id: access.access.user.id, name: access.access.user.name },
+      text: result.message.text,
+      createdAt: result.message.createdAt
+    });
+    realtime?.publishMessage(
+      access.access.workspace.id,
+      channelId,
+      message as ChannelMessageResponse
+    );
     response.status(HTTP_STATUS.created).json(message);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -365,6 +415,6 @@ export const createDownloadChannelAttachmentController = (
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.status(HTTP_STATUS.ok).send(buffer);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };

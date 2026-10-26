@@ -12,6 +12,7 @@ import type { ChatAttachmentIntegration } from "../../../integrations/index.js";
 import type { ApiConfig } from "../../../types/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import { createWorkspaceServiceFixture } from "../../../tests/workspace-service-fixture.js";
+import { allowApiRateLimit } from "../../../tests/rate-limit-fixture.js";
 
 const logger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 const config: ApiConfig = {
@@ -56,9 +57,19 @@ const channelMessage: ChannelMessageWithSender = Object.freeze({
   id: "message-1",
   channelId: "channel-1",
   senderId: memberIdentity.id,
+  type: "message",
   text: "Hello, channel!",
   createdAt: new Date("2026-10-15T12:00:00.000Z"),
   sender: Object.freeze({ id: memberIdentity.id, name: memberIdentity.name, image: null })
+});
+const departureEntry = Object.freeze({
+  id: "departure-1",
+  channelId: "channel-1",
+  type: "system" as const,
+  systemEvent: "member_left" as const,
+  actor: Object.freeze({ id: memberIdentity.id, name: memberIdentity.name }),
+  text: "" as const,
+  createdAt: new Date("2026-10-13T00:00:00.000Z")
 });
 
 const startApi = async (
@@ -77,13 +88,16 @@ const startApi = async (
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
     delete: () => Promise.resolve({ kind: "not-found" })
   },
-  attachmentStorage?: ChatAttachmentIntegration
+  attachmentStorage?: ChatAttachmentIntegration,
+  updateChannel?: ChannelService["update"]
 ) => {
   const workspaceFixture = createWorkspaceServiceFixture();
   workspaceFixture.seed("workspace-configured", [memberIdentity.id, otherMemberIdentity.id]);
   const app = createApp({
     config,
     logger,
+    rateLimiter: allowApiRateLimit,
+    trustVercelForwardedFor: false,
     authentication,
     workspaceService: workspaceFixture.service,
     channelMessageService: messageService,
@@ -98,7 +112,8 @@ const startApi = async (
       ensureGeneralChannel,
       listMembers,
       inviteMember,
-      removeMember
+      removeMember,
+      ...(updateChannel ? { update: updateChannel } : {})
     }
   });
 
@@ -111,6 +126,98 @@ const startApi = async (
     url: `http://127.0.0.1:${String(address.port)}/channels`,
     workspaceFixture
   };
+
+  void test("updates channel metadata through the admin-facing channel contract", async (context) => {
+    let received: unknown[] = [];
+    const { server, url } = await startApi(
+      createTestChannel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (...args) => {
+        received = args;
+        return Promise.resolve({
+          kind: "updated",
+          channel: { ...createdResult.channel, name: "announcements", description: "News", visibility: "private" }
+        });
+
+        void test("serializes a channel departure as a typed system history entry without a sender", async (context) => {
+          const entry = {
+            id: "departure-1",
+            channelId: "channel-1",
+            type: "system" as const,
+            systemEvent: "member_left" as const,
+            actor: { id: "departed-user", name: "Departed Member" },
+            text: "" as const,
+            createdAt: new Date("2026-10-26T09:00:00.000Z")
+          };
+          const messageService: ChannelMessageService = {
+            list: () => Promise.resolve({
+              kind: "listed",
+              messages: [entry as unknown as ChannelMessageWithSender],
+              nextCursor: null
+            }),
+            send: () => Promise.resolve({ kind: "channel-unavailable" }),
+            getAttachment: () => Promise.resolve({ kind: "not-found" }),
+            delete: () => Promise.resolve({ kind: "not-found" })
+          };
+          const { server, url } = await startApi(createTestChannel, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined, messageService);
+          context.after(async () => server.stop());
+          const response = await fetch(`${url}/channel-1/messages`, {
+            headers: { ...workspaceHeaders, "x-test-identity": "member" }
+          });
+          assert.equal(response.status, 200);
+          assert.deepEqual(await response.json(), {
+            messages: [{
+              id: "departure-1",
+              channelId: "channel-1",
+              type: "system",
+              systemEvent: "member_left",
+              actor: { id: "departed-user", name: "Departed Member" },
+              text: "",
+              createdAt: "2026-10-26T09:00:00.000Z"
+            }],
+            nextCursor: null
+          });
+        });
+      }
+    );
+    context.after(async () => server.stop());
+    const response = await fetch(`${url}/channel-1`, {
+      method: "PATCH",
+      headers: { ...workspaceHeaders, "content-type": "application/json", "x-test-identity": "member" },
+      body: JSON.stringify({ name: "announcements", description: "News", visibility: "private" })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(received, [
+      "workspace-configured",
+      "channel-1",
+      memberIdentity.id,
+      { name: "announcements", description: "News", visibility: "private" }
+    ]);
+    assert.deepEqual(await response.json(), {
+      channel: {
+        id: "channel-1",
+        workspaceId: "workspace-configured",
+        name: "announcements",
+        description: "News",
+        visibility: "private",
+        lifecycleState: "active",
+        createdBy: memberIdentity.id,
+        createdAt: createdResult.channel.createdAt.toISOString(),
+        updatedAt: createdResult.channel.updatedAt.toISOString(),
+        archivedAt: null
+      }
+    });
+  });
 };
 
 const createTestChannel: ChannelService["create"] = (input) => {
@@ -289,7 +396,7 @@ void test("joins public channels and leaves with authenticated workspace members
     },
     (workspaceId, channelId, userId) => {
       leaveArguments = [workspaceId, channelId, userId];
-      return Promise.resolve({ kind: "left" });
+      return Promise.resolve({ kind: "left", entry: departureEntry });
     }
   );
   context.after(async () => server.stop());
@@ -328,7 +435,7 @@ void test("rejects private channel joins and allows the last administrator to le
     undefined,
     undefined,
     () => Promise.resolve({ kind: "not-public" }),
-    () => Promise.resolve({ kind: "left" })
+    () => Promise.resolve({ kind: "left", entry: departureEntry })
   );
   context.after(async () => server.stop());
 
@@ -660,6 +767,7 @@ void test("lists and sends channel messages with current workspace authorization
       id: "message-1",
       channelId: "channel-1",
       senderId: memberIdentity.id,
+      type: "message",
       text: "Hello, channel!",
       createdAt: channelMessage.createdAt.toISOString(),
       sender: { id: memberIdentity.id, name: memberIdentity.name, image: null }

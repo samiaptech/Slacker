@@ -20,6 +20,7 @@ import {
   DIRECT_MESSAGE_PAGE_SIZE_MAX
 } from "../domain/index.js";
 import type { DirectConversationWithParticipant, DirectMessageService, DirectMessageWithSender } from "../services/index.js";
+import { isNotificationStorageUnavailable, type NotificationService } from "../../notifications/public/index.js";
 
 type DirectMessageIdentity = Readonly<{ id: string; name: string; email: string; image: string | null }>;
 type DirectWorkspaceAccessResult =
@@ -41,6 +42,7 @@ type ControllerDependencies = Readonly<{
   service: DirectMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
   realtime?: DirectMessageRealtime;
+  notifications?: Pick<NotificationService, "notifyDirectMessage" | "markResourceRead">;
 }>;
 
 type RequestAccessResult =
@@ -163,6 +165,14 @@ const sendNotFound = (next: Parameters<RequestHandler>[2]): void => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+const normalizeNotificationFailure = (error: unknown): unknown =>
+  isNotificationStorageUnavailable(error)
+    ? createApplicationError({
+      code: ERROR_CODES.internal,
+      message: "Notifications are temporarily unavailable.",
+      status: HTTP_STATUS.serviceUnavailable
+    })
+    : error;
 
 export const createListDirectMessagesController = (
   { getIdentity, getWorkspaceAccess, service }: ControllerDependencies
@@ -184,7 +194,7 @@ export const createListDirectMessagesController = (
     };
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -234,7 +244,7 @@ export const createOpenDirectMessageController = (
     response.status(result.created ? HTTP_STATUS.created : HTTP_STATUS.ok)
       .json({ conversation: toConversationResponse(result.conversation) });
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -264,12 +274,12 @@ export const createGetDirectMessageController = (
     }
     response.status(HTTP_STATUS.ok).json({ conversation: toConversationResponse(result.conversation) });
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
 export const createListDirectMessageHistoryController = (
-  { getIdentity, getWorkspaceAccess, service }: ControllerDependencies
+  { getIdentity, getWorkspaceAccess, service, notifications }: ControllerDependencies
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -306,13 +316,17 @@ export const createListDirectMessageHistoryController = (
       sendNotFound(next);
       return;
     }
+    await notifications?.markResourceRead(access.userId, {
+      type: "direct_message",
+      id: conversationId
+    });
     const body: DirectMessageListResponse = {
       messages: result.messages.map(toMessageResponse),
       nextCursor: result.nextCursor
     };
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -378,12 +392,12 @@ export const createDeleteDirectMessageController = (
     }
     response.status(HTTP_STATUS.noContent).end();
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
 export const createSendDirectMessageController = (
-  { getIdentity, getWorkspaceAccess, service, realtime }: ControllerDependencies
+  { getIdentity, getWorkspaceAccess, service, realtime, notifications }: ControllerDependencies
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -479,10 +493,17 @@ export const createSendDirectMessageController = (
       return;
     }
     const message = toMessageResponse(result.message);
+    await notifications?.notifyDirectMessage({
+      workspaceId: access.workspaceId,
+      conversationId,
+      messageId: result.message.id,
+      actor: { id: access.userId, name: access.senderProfile.name },
+      createdAt: result.message.createdAt
+    });
     realtime?.publishDirectMessage(access.workspaceId, conversationId, message);
     response.status(HTTP_STATUS.created).json(message);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -515,7 +536,7 @@ export const createAuthorizeDirectMessageUploadController = (
     }
     next();
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -563,6 +584,6 @@ export const createDownloadDirectMessageAttachmentController = (
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.status(HTTP_STATUS.ok).send(buffer);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };

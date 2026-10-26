@@ -104,7 +104,7 @@ const createHarness = (workspaceMembershipUnavailable = false) => {
       memberships.set(`${channelId}:${userId}`, membership);
       return Promise.resolve({ kind: "joined" as const, membership });
     },
-    leaveChannel: (workspaceId, channelId, userId) => {
+    leaveChannel: (workspaceId, channelId, userId, entry) => {
       const channel = channels.get(channelId);
       if (!channel || channel.workspaceId !== workspaceId || channel.lifecycleState !== "active") {
         return Promise.resolve({ kind: "channel-unavailable" as const });
@@ -112,7 +112,7 @@ const createHarness = (workspaceMembershipUnavailable = false) => {
       const membership = memberships.get(`${channelId}:${userId}`);
       if (!membership) return Promise.resolve({ kind: "already-left" as const });
       memberships.delete(`${channelId}:${userId}`);
-      return Promise.resolve({ kind: "left" as const });
+      return Promise.resolve({ kind: "left" as const, entry });
     },
     findCreationRequest: (workspaceId, actorId, key) => Promise.resolve([...requests.values()].find((request) => request.workspaceId === workspaceId && request.actorId === actorId && request.key === key) ?? null)
   };
@@ -331,10 +331,13 @@ void test("paginates channel discovery by stable name and excludes private and j
 
     const joined = await service.joinPublicChannel("workspace-1", created.result.channel.id, "member");
     assert.equal(joined.kind, "joined");
-    assert.deepEqual(await service.leaveChannel("workspace-1", created.result.channel.id, "owner"), { kind: "left" });
+    const ownerLeave = await service.leaveChannel("workspace-1", created.result.channel.id, "owner");
+    assert.equal(ownerLeave.kind, "left");
+    assert.equal(ownerLeave.entry.systemEvent, "member_left");
+    assert.equal(ownerLeave.entry.actor.name, "Former member");
     assert.equal(await service.getForMember("workspace-1", created.result.channel.id, "owner"), null);
     assert.ok(await service.getForMember("workspace-1", created.result.channel.id, "member"));
-    assert.deepEqual(await service.leaveChannel("workspace-1", created.result.channel.id, "member"), { kind: "left" });
+    assert.equal((await service.leaveChannel("workspace-1", created.result.channel.id, "member")).kind, "left");
     assert.deepEqual(await service.leaveChannel("workspace-1", created.result.channel.id, "member"), { kind: "already-left" });
     assert.equal(await service.getForMember("workspace-1", created.result.channel.id, "member"), null);
     assert.equal(channels.has(created.result.channel.id), true);

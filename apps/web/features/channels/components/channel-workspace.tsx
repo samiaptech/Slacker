@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
+import type { NotificationResponse } from "@workspace/types";
 import { Activity, ChevronDown, Hash, LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, UserRound, Users } from "lucide-react";
 import {
   Button,
@@ -26,6 +27,7 @@ import { ChannelCreateDialog } from "./create-channel-dialog";
 import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelProfileToggleProvider, useChannelProfileToggle } from "./channel-profile-toggle-context";
+import { NotificationCenter, useNotifications } from "@/features/notifications/public";
 import { directConversationListResponseSchema, directConversationResponseSchema } from "@/features/direct-messages/public";
 import type { DirectConversationView } from "@/features/direct-messages/public";
 import {
@@ -48,6 +50,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const { activeWorkspace, currentUser, selectWorkspace, signOut, startCreatingWorkspace, workspaces } = useWorkspaceContext();
   const profileToggle = useChannelProfileToggle();
   const realtime = useChannelRealtime();
+  const notificationInbox = useNotifications(apiBaseUrl, realtime.socket);
   const pathname = usePathname();
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -76,7 +79,10 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const [openingDirectMessageFor, setOpeningDirectMessageFor] = useState<string | null>(null);
   const [directMessageActionError, setDirectMessageActionError] = useState<string | null>(null);
   const activeChannel = pathname.startsWith("/channels/")
-    ? channelList.find((channel) => pathname === `/channels/${encodeURIComponent(channel.id)}`)
+    ? channelList.find((channel) => {
+        const channelPath = `/channels/${encodeURIComponent(channel.id)}`;
+        return pathname === channelPath || pathname === `${channelPath}/about`;
+      })
     : undefined;
   const activeConversation = pathname.startsWith("/messages/")
     ? directConversations.find((conversation) => pathname === `/messages/${encodeURIComponent(conversation.id)}`)
@@ -361,6 +367,18 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
     }
   };
 
+  const openNotification = (notification: NotificationResponse): boolean => {
+    if (!workspaces.some(({ id }) => id === notification.workspaceId)) return false;
+    if (notification.workspaceId !== activeWorkspace.id) selectWorkspace(notification.workspaceId);
+    notificationInbox.markResourceReadLocally(notification.resource);
+    setIsMobileSidebarOpen(false);
+    const target = notification.resource.type === "channel"
+      ? `/channels/${encodeURIComponent(notification.resource.id)}`
+      : `/messages/${encodeURIComponent(notification.resource.id)}`;
+    router.push(target as Route);
+    return true;
+  };
+
   return (
     <div className={`workspace-layout ${isSidebarOpen ? "" : "workspace-layout-collapsed"}`}>
       {isMobileSidebarOpen ? (
@@ -494,7 +512,10 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                           : "text-white/70 hover:bg-white/[0.07] hover:text-white"
                       }`}
                       href={href as Route}
-                      onClick={() => setIsMobileSidebarOpen(false)}
+                      onClick={() => {
+                        notificationInbox.markResourceReadLocally({ type: "direct_message", id: conversation.id });
+                        setIsMobileSidebarOpen(false);
+                      }}
                     >
                       <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-[11px] font-semibold text-[#c8e8d8]">
                         {conversation.otherParticipant.image
@@ -502,6 +523,12 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                           : conversation.otherParticipant.name.trim().slice(0, 1).toUpperCase()}
                       </span>
                       <span className="truncate">{conversation.otherParticipant.name}</span>
+                      {notificationInbox.isUnread({ type: "direct_message", id: conversation.id }) ? (
+                        <>
+                          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[#b8e3d1]" />
+                          <span className="sr-only">Unread messages</span>
+                        </>
+                      ) : null}
                     </Link>
                   </li>
                 );
@@ -550,10 +577,19 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                                   : "text-white/70 hover:bg-white/[0.07] hover:text-white"
                               }`}
                               href={href as Route}
-                              onClick={() => setIsMobileSidebarOpen(false)}
+                              onClick={() => {
+                                notificationInbox.markResourceReadLocally({ type: "channel", id: channel.id });
+                                setIsMobileSidebarOpen(false);
+                              }}
                             >
                               <Hash aria-hidden="true" className="size-4 shrink-0 text-white/40" />
                               <span className="truncate">{channel.name}</span>
+                              {notificationInbox.isUnread({ type: "channel", id: channel.id }) ? (
+                                <>
+                                  <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[#b8e3d1]" />
+                                  <span className="sr-only">Unread channel activity</span>
+                                </>
+                              ) : null}
                             </Link>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -586,6 +622,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                             <div className="flex items-center justify-between gap-2">
                               <p className="truncate text-sm font-medium text-white"># {channel.name}</p>
                               <Button
+                                className="h-8 rounded-lg border border-[#5a9180] bg-[#286b5c] px-3 text-white shadow-sm hover:border-[#78aa98] hover:bg-[#347e6c] hover:text-white active:bg-[#20594e]"
                                 disabled={membershipActionId !== null}
                                 onClick={() => void joinChannel(channel.id)}
                                 size="sm"
@@ -716,22 +753,48 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
           <div className="workspace-main-header-copy">
             <h2 className="workspace-main-header-title">
               {activeChannel ? (
-                <button
-                  aria-controls="channel-profile-panel channel-profile-mobile"
-                  aria-expanded={profileToggle.isOpen}
-                  aria-label={`${profileToggle.isOpen ? "Hide" : "Show"} about #${activeChannel.name}`}
-                  className="inline-flex min-w-0 items-center gap-2 rounded-md text-left transition-colors hover:text-[#507b68] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9bc3ad]"
-                  onClick={profileToggle.toggle}
-                  type="button"
-                >
-                  <Hash aria-hidden="true" className="size-4 shrink-0 text-[#74877e]" />
-                  <span className="truncate">{activeChannel.name}</span>
-                  <ChevronDown aria-hidden="true" className={`size-3.5 shrink-0 transition-transform duration-200 ${profileToggle.isOpen ? "rotate-180" : ""}`} />
-                </button>
+                pathname.endsWith("/about") ? (
+                  <span className="truncate">About #{activeChannel.name}</span>
+                ) : (
+                  <button
+                    aria-expanded={profileToggle.isOpen}
+                    aria-label={`Open about #${activeChannel.name}`}
+                    className="inline-flex min-w-0 items-center gap-2 rounded-md text-left transition-colors hover:text-[#507b68] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9bc3ad]"
+                    onClick={() => {
+                      if (window.matchMedia("(max-width: 1023px)").matches) {
+                        profileToggle.setIsOpen(false);
+                        router.push(`/channels/${encodeURIComponent(activeChannel.id)}/about` as Route);
+                      } else {
+                        profileToggle.toggle();
+                      }
+                    }}
+                    type="button"
+                  >
+                    <Hash aria-hidden="true" className="size-4 shrink-0 text-[#74877e]" />
+                    <span className="truncate">{activeChannel.name}</span>
+                    <ChevronDown aria-hidden="true" className={`size-3.5 shrink-0 transition-transform duration-200 ${profileToggle.isOpen ? "rotate-180" : ""}`} />
+                  </button>
+                )
               ) : activeConversation?.otherParticipant.name ?? (pathname === "/profile" ? "Your profile" : "Workspace")}
             </h2>
             <p className="workspace-main-header-subtitle">{activeChannel?.description || (activeChannel ? activeChannel.name.toLocaleLowerCase() === "general" ? "The everyday, the big ideas, and everything in between." : `${activeChannel.visibility === "public" ? "Public" : "Private"} channel · Team conversation` : activeConversation ? "Direct message" : "Your team space")}</p>
           </div>
+          <NotificationCenter
+            activeWorkspaceId={activeWorkspace.id}
+            channels={channelList}
+            conversations={directConversations}
+            error={notificationInbox.error}
+            hasMore={notificationInbox.hasMore}
+            isLoading={notificationInbox.isLoading}
+            isLoadingMore={notificationInbox.isLoadingMore}
+            notifications={notificationInbox.notifications}
+            onLoadMore={notificationInbox.loadMore}
+            onMarkRead={notificationInbox.markRead}
+            onOpen={openNotification}
+            onRefresh={notificationInbox.refresh}
+            unreadCount={notificationInbox.unreadCount}
+            workspaces={workspaces}
+          />
           <Link aria-label="Open your profile" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#d8ebe2] text-sm font-semibold text-[#244b43]" href="/profile" onClick={() => setIsMobileSidebarOpen(false)}>{(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}</Link>
         </header>
         <div className={`flex min-h-0 flex-1 flex-col ${pathname === "/profile" || pathname.startsWith("/members/") ? "overflow-y-auto p-4 sm:p-6" : "overflow-hidden"}`}>{children}</div>

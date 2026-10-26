@@ -8,6 +8,7 @@ import {
   createAuthenticationIntegration,
   createCloudinaryIntegration,
   createMongoDbIntegration,
+  createMongoRateLimiter,
   createSocketIoIntegration
 } from "./integrations/index.js";
 import { createMongoWorkspaceStorage, createWorkspaceRepository, createWorkspaceService } from "./features/workspaces/index.js";
@@ -32,6 +33,11 @@ import {
   createMessageSearchService,
   createMongoMessageSearchStorage
 } from "./features/message-search/index.js";
+import {
+  createMongoNotificationStorage,
+  createNotificationRealtime,
+  createNotificationService
+} from "./features/notifications/index.js";
 
 const isVercelRuntime = process.env.VERCEL === "1";
 
@@ -56,6 +62,8 @@ const attachmentStorage = config.cloudinary
   ? createCloudinaryIntegration(config.cloudinary)
   : undefined;
 const mongoDatabase = database.getDatabase();
+const rateLimiter = createMongoRateLimiter({ database: mongoDatabase });
+await rateLimiter.ensureIndexes();
 const socketAdapterCollection = mongoDatabase.collection("socket_io_adapter_events");
 await socketAdapterCollection.createIndex(
   { createdAt: 1 },
@@ -99,6 +107,7 @@ const messageSearchService = createMessageSearchService({
   repository: createMessageSearchRepository(
     createMongoMessageSearchStorage(database.getDatabase())
   ),
+  rateLimiter,
   findUsersByIds: authentication.findUsersByIds
 });
 const channelService = createChannelService({
@@ -139,7 +148,8 @@ const socketIo = createSocketIoIntegration({
   webOrigin: config.webOrigin,
   getIdentity: authentication.getIdentity,
   logger,
-  adapterCollection: socketAdapterCollection
+  adapterCollection: socketAdapterCollection,
+  trustVercelForwardedFor: isVercelRuntime
 });
 const channelRealtime = createChannelRealtime({
   socketIo,
@@ -152,10 +162,18 @@ const channelRealtime = createChannelRealtime({
   logger
 });
 const directMessageRealtime = createDirectMessageRealtime({ socketIo, service: directMessageService, logger });
+const notificationService = createNotificationService({
+  storage: createMongoNotificationStorage(mongoDatabase),
+  createId: randomUUID,
+  now: () => new Date(),
+  realtime: createNotificationRealtime(socketIo)
+});
 const app = createApp({
   config,
   logger,
   appInstance: express(),
+  rateLimiter,
+  trustVercelForwardedFor: isVercelRuntime,
   authentication,
   ...(attachmentStorage ? { attachmentStorage } : {}),
   channelService,
@@ -163,6 +181,7 @@ const app = createApp({
   channelRealtime,
   directMessageService,
   directMessageRealtime,
+  notificationService,
   messageSearchService,
   workspaceService
 });

@@ -17,8 +17,9 @@ Plain terms are supported; query syntax is not. Queries are 2–100 Unicode code
 are normalized to word tokens. Each page contains at most 20 results, at most 20 pages
 (400 results) are returned, and Mongo text queries have a two-second execution limit.
 Results sort by Mongo text relevance, then message timestamp and ID. The API limits each
-authenticated user to 30 requests per rolling minute per API process. At the result cap the
-response sets `truncated` so clients can prompt the user to refine the query.
+authenticated user to 30 requests per rolling minute, shared across API instances through
+MongoDB. At the result cap the response sets `truncated` so clients can prompt the user to
+refine the query.
 
 Search uses native MongoDB text indexes on channel and direct message text. There is no
 asynchronous index queue or index lag; persisted edits and deletions are reflected by

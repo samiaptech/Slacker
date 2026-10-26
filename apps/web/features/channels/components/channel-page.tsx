@@ -8,9 +8,9 @@ import { ChannelProfilePanel } from "./channel-profile-panel";
 import { useChannelProfileToggle } from "./channel-profile-toggle-context";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 
-type ChannelPageProps = Readonly<{ apiBaseUrl: string; channelId: string }>;
+type ChannelPageProps = Readonly<{ apiBaseUrl: string; channelId: string; view?: "conversation" | "about" }>;
 
-export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactElement => {
+export const ChannelPage = ({ apiBaseUrl, channelId, view = "conversation" }: ChannelPageProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
   const [channel, setChannel] = useState<ChannelResponseView | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -54,10 +54,15 @@ export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactE
   }, [activeWorkspace.id, apiBaseUrl, channelId]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${view === "about" ? "flex-col" : "flex-col lg:flex-row"}`}>
+      <div className={view === "about" && channel ? "hidden" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"}>
         {isLoading ? (
-          channel ? null : (
+          channel ? null : view === "about" ? (
+            <section aria-label="Loading channel information" className="mx-auto w-full max-w-3xl space-y-4 p-5 sm:p-8" role="status">
+              <div className="h-10 w-44 animate-pulse rounded-lg bg-muted" />
+              <div className="h-52 animate-pulse rounded-2xl bg-muted" />
+            </section>
+          ) : (
             <ChannelMessages
               apiBaseUrl={apiBaseUrl}
               canSend={false}
@@ -71,7 +76,7 @@ export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactE
             <h1 className="text-xl font-semibold text-foreground" id="channel-error-title">Channel unavailable</h1>
             <p className="mt-2 text-sm text-muted-foreground" role="alert">{errorMessage}</p>
           </section>
-        ) : channel ? (
+        ) : channel && view === "conversation" ? (
           <ChannelMessages
             apiBaseUrl={apiBaseUrl}
             canSend={channel.lifecycleState === "active"}
@@ -87,7 +92,8 @@ export const ChannelPage = ({ apiBaseUrl, channelId }: ChannelPageProps): ReactE
           channelId={channel.id}
           channelName={channel.name}
           description={channel.description}
-          isOpen={isProfileOpen}
+          isOpen={view === "about" || isProfileOpen}
+          isPage={view === "about"}
           onOpenChange={setIsProfileOpen}
           managementPanel={channel.visibility === "private" ? (
             <ChannelMembersPanel apiBaseUrl={apiBaseUrl} channelId={channel.id} isActive={channel.lifecycleState === "active"} />

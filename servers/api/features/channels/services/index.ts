@@ -8,6 +8,7 @@ export type {
   ChannelMembersServiceResult,
   InviteChannelMemberServiceResult,
   RemoveChannelMemberServiceResult,
+  UpdateChannelServiceResult,
   ChannelMemberProfile,
   ChannelMemberDetails
 } from "./channel.service.js";

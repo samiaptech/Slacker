@@ -26,6 +26,8 @@
     { "source": "/workspace", "destination": { "service": "api" } },
     { "source": "/direct-messages/(.*)", "destination": { "service": "api" } },
     { "source": "/direct-messages", "destination": { "service": "api" } },
+    { "source": "/notifications/(.*)", "destination": { "service": "api" } },
+    { "source": "/notifications", "destination": { "service": "api" } },
     { "source": "/channels", "destination": { "service": "api" } },
     {
       "source": "/channels/(.*)",

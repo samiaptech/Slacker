@@ -16,15 +16,25 @@ import {
 import { createHealthRoutes } from "../features/health/index.js";
 import { createWorkspaceRoutes } from "../features/workspaces/index.js";
 import { createMessageSearchRoutes, type MessageSearchService } from "../features/message-search/index.js";
+import { createNotificationRoutes, type NotificationService } from "../features/notifications/index.js";
 import type { AuthenticationIntegration } from "../integrations/index.js";
 import type { ChatAttachmentIntegration } from "../integrations/index.js";
+import type { SharedRateLimiter } from "../integrations/mongodb/index.js";
 import type { WorkspaceService } from "../features/workspaces/index.js";
-import { createCorsMiddleware, createErrorHandler, createNotFoundHandler } from "../middleware/index.js";
+import {
+  createApiRateLimitMiddleware,
+  createCorsMiddleware,
+  createErrorHandler,
+  createNotFoundHandler,
+  createSecurityHeadersMiddleware
+} from "../middleware/index.js";
 
 type AppDependencies = Readonly<{
   config: ApiConfig;
   logger: Logger;
   appInstance?: Express;
+  rateLimiter: SharedRateLimiter;
+  trustVercelForwardedFor: boolean;
   authentication: AuthenticationIntegration;
   attachmentStorage?: ChatAttachmentIntegration;
   channelService: ChannelService;
@@ -33,6 +43,7 @@ type AppDependencies = Readonly<{
   directMessageService?: DirectMessageService;
   directMessageRealtime?: DirectMessageRealtimePublisher;
   messageSearchService?: MessageSearchService;
+  notificationService?: NotificationService;
   workspaceService: WorkspaceService;
 }>;
 
@@ -40,6 +51,8 @@ export const createApp = ({
   config,
   logger,
   appInstance = express(),
+  rateLimiter,
+  trustVercelForwardedFor,
   authentication,
   attachmentStorage,
   channelService,
@@ -48,6 +61,7 @@ export const createApp = ({
   directMessageService,
   directMessageRealtime,
   messageSearchService,
+  notificationService,
   workspaceService
 }: AppDependencies): Express => {
   const app = appInstance;
@@ -61,7 +75,9 @@ export const createApp = ({
         || /^\/api\/auth\/callback(?:\/|\?|$)/.test(url);
     }
   }));
+  app.use(createSecurityHeadersMiddleware());
   app.use(createCorsMiddleware({ origin: config.webOrigin }));
+  app.use(createApiRateLimitMiddleware({ rateLimiter, trustVercelForwardedFor }));
   app.all("/api/auth", authentication.handler);
   app.all("/api/auth/*splat", authentication.handler);
   app.use(express.json({ limit: apiRuntime.jsonBodyLimit }));
@@ -84,7 +100,8 @@ export const createApp = ({
     service: channelService,
     messageService: channelMessageService,
     ...(attachmentStorage ? { attachmentStorage } : {}),
-    ...(channelRealtime ? { realtime: channelRealtime } : {})
+    ...(channelRealtime ? { realtime: channelRealtime } : {}),
+    ...(notificationService ? { notifications: notificationService } : {})
   })];
   if (directMessageService) {
     featureRouters.push(createDirectMessageRoutes({
@@ -92,7 +109,8 @@ export const createApp = ({
       getWorkspaceAccess: workspaceService.getAccess,
       service: directMessageService,
       ...(attachmentStorage ? { attachmentStorage } : {}),
-      ...(directMessageRealtime ? { realtime: directMessageRealtime } : {})
+      ...(directMessageRealtime ? { realtime: directMessageRealtime } : {}),
+      ...(notificationService ? { notifications: notificationService } : {})
     }));
   }
   if (messageSearchService) {
@@ -100,6 +118,12 @@ export const createApp = ({
       getIdentity: authentication.getIdentity,
       getWorkspaceAccess: workspaceService.getAccess,
       service: messageSearchService
+    }));
+  }
+  if (notificationService) {
+    featureRouters.push(createNotificationRoutes({
+      getIdentity: authentication.getIdentity,
+      service: notificationService
     }));
   }
   for (const featureRouter of featureRouters) app.use(featureRouter);

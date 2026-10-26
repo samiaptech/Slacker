@@ -1,4 +1,4 @@
-import type { Channel, ChannelMembership } from "../domain/index.js";
+import type { Channel, ChannelMembership, ChannelSystemEntry } from "../domain/index.js";
 import type { Logger } from "@workspace/logging";
 import {
   prepareCreateChannelCommand,
@@ -13,7 +13,8 @@ import {
   type ChannelMembersResult,
   type ChannelCreationRequest,
   type ChannelRepository,
-  type RemoveChannelMemberResult
+  type RemoveChannelMemberResult,
+  type UpdateChannelResult
 } from "../repositories/index.js";
 
 export type CreateChannelInput = Readonly<{
@@ -39,7 +40,7 @@ export type JoinChannelServiceResult =
   | Readonly<{ kind: "unavailable" }>;
 
 export type LeaveChannelServiceResult =
-  | Readonly<{ kind: "left" }>
+  | Readonly<{ kind: "left"; entry: ChannelSystemEntry }>
   | Readonly<{ kind: "already-left" }>
   | Readonly<{ kind: "channel-unavailable" }>
   | Readonly<{ kind: "unavailable" }>;
@@ -80,6 +81,11 @@ export type InviteChannelMemberServiceResult =
 export type RemoveChannelMemberServiceResult =
   | RemoveChannelMemberResult
   | Readonly<{ kind: "unavailable" }>;
+export type UpdateChannelServiceResult =
+  | UpdateChannelResult
+  | Readonly<{ kind: "invalid"; error: CreateChannelCommandError }>
+  | Readonly<{ kind: "conflict" }>
+  | Readonly<{ kind: "unavailable" }>;
 
 type ChannelServiceDependencies = Readonly<{
   repository: ChannelRepository;
@@ -107,6 +113,35 @@ export const createChannelService = ({
     repository.findForMember(workspaceId, userId),
   listChannels: (workspaceId: string, userId: string, query: ChannelListQuery) =>
     repository.findChannels(workspaceId, userId, query),
+  update: async (
+    workspaceId: string,
+    channelId: string,
+    actorId: string,
+    input: Readonly<{ name: string; description: string; visibility: string }>
+  ): Promise<UpdateChannelServiceResult> => {
+    const prepared = prepareCreateChannelCommand({ ...input, workspaceId, creatorId: actorId });
+    if (!prepared.ok) return Object.freeze({ kind: "invalid", error: prepared.error });
+    if (!repository.updateChannel) return Object.freeze({ kind: "unavailable" });
+    try {
+      return await repository.updateChannel(
+        workspaceId,
+        channelId,
+        actorId,
+        {
+          name: prepared.command.name,
+          description: prepared.command.description,
+          visibility: prepared.command.visibility
+        },
+        now()
+      );
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      if (isChannelDuplicateKeyError(error) && error.constraint === "active-name") {
+        return Object.freeze({ kind: "conflict" });
+      }
+      throw error;
+    }
+  },
   listMembers: async (workspaceId: string, channelId: string, userId: string): Promise<ChannelMembersServiceResult> => {
     try {
       const result: ChannelMembersResult = await repository.listMembers(workspaceId, channelId, userId);
@@ -298,10 +333,24 @@ export const createChannelService = ({
       throw error;
     }
   },
-  leaveChannel: async (workspaceId: string, channelId: string, userId: string): Promise<LeaveChannelServiceResult> => {
+  leaveChannel: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    actorName = "Former member"
+  ): Promise<LeaveChannelServiceResult> => {
     try {
       const occurredAt = now();
-      const result = await repository.leaveChannel(workspaceId, channelId, userId);
+      const entry: ChannelSystemEntry = Object.freeze({
+        id: createId(),
+        channelId,
+        type: "system",
+        systemEvent: "member_left",
+        actor: Object.freeze({ id: userId, name: actorName }),
+        text: "",
+        createdAt: occurredAt
+      });
+      const result = await repository.leaveChannel(workspaceId, channelId, userId, entry);
       if (result.kind === "left") {
         logger.info("Member left a channel.", {
           event: "channel.member_left",
@@ -421,4 +470,7 @@ export const createChannelService = ({
   }
 });
 
-export type ChannelService = ReturnType<typeof createChannelService>;
+type ChannelServiceImplementation = ReturnType<typeof createChannelService>;
+export type ChannelService = Omit<ChannelServiceImplementation, "update"> & Readonly<{
+  update?: ChannelServiceImplementation["update"];
+}>;

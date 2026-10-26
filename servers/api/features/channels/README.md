@@ -22,6 +22,17 @@ Creation uses a Mongo transaction across those three collections. The MongoDB de
 
 `DELETE /channels/:channelId/memberships` removes the caller's membership; repeating the request is successful and idempotent. Leaving does not delete the channel or its retained data. The last admin may leave; the channel remains active and any other members retain access even if no administrators remain. Both endpoints use Mongo transactions and return `Cache-Control: no-store`. A per-channel `membershipRevision` write serializes membership changes; the field is optional so existing channel documents remain valid until their next membership mutation. Run `pnpm --filter @workspace/api channels:initialize` against the configured database after deploying this membership schema, then restart the API before testing joins or leaves; writes remain unavailable until the installed validators match the current definitions.
 
+A self-leave atomically deletes the caller's membership and appends a typed
+`system` / `member_left` history entry containing the authenticated member's
+display name and leave time. It has no `senderId` or `sender`, is delivered to
+the remaining channel room members as `channel:system:new`, and creates
+`channel_member_left` notifications for the remaining members. Joining, inviting,
+admin removal, and metadata updates also notify current members other than the
+actor. `PATCH /channels/:channelId` accepts strict `{ "name": "...",
+"description": "..." | null, "visibility": "public" | "private" }` JSON and
+requires a channel admin. See the [API README](../../README.md#in-app-notifications)
+for notification response, read, deduplication, mention, and realtime contracts.
+
 Channel details and message history are member-only: public discovery alone grants neither. `GET /channels/:channelId/messages` returns the newest 50 messages in chronological order, with an optional opaque `before` cursor and a `limit` from 1 to 100. The returned `nextCursor` loads older messages; message ordering uses creation time and message ID as a stable tie-breaker. `POST /channels/:channelId/messages` accepts strict JSON containing only `text`, with 1–4,000 Unicode code points after whitespace validation. Both endpoints require a signed-in workspace member and current channel membership and use `Cache-Control: no-store`. The sender is always the authenticated user; responses include display name and avatar, never email. Missing profile data displays as “Former member.” Message sends and membership changes serialize through a channel revision write; reads check membership with the history query. Message text is never included in ordinary application logs.
 
 Messages are retained when a user leaves or loses membership. An inaccessible channel returns the same privacy-safe `route_not_found` response as channel details. Archived channels remain readable to their members, but cannot accept new messages. Authenticated Socket.IO subscriptions deliver persisted messages and membership/list updates to authorized channel and workspace rooms. The message history REST API remains authoritative; on reconnect the client re-subscribes and reloads history to recover events missed while offline.

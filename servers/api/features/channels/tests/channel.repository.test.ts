@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeChannelListCursor, type Channel, type ChannelListQuery, type ChannelMembership } from "../domain/index.js";
-import type { ChannelCreationRequestDocument, ChannelDocument, ChannelMembershipDocument } from "../models/index.js";
+import type { ChannelCreationRequestDocument, ChannelDocument, ChannelMembershipDocument, ChannelMessageDocument } from "../models/index.js";
 import { createChannelRepository, type ChannelStorage } from "../repositories/index.js";
 
 const channels = new Map<string, ChannelDocument>();
 const memberships = new Map<string, ChannelMembershipDocument>();
 const requests = new Map<string, ChannelCreationRequestDocument>();
+const channelMessages: ChannelMessageDocument[] = [];
 let failMembershipWrite = false;
 let failCreationRequestWrite = false;
 
@@ -16,6 +17,7 @@ const storage: ChannelStorage = {
     const pendingChannels: ChannelDocument[] = [];
     const pendingMemberships: ChannelMembershipDocument[] = [];
     const pendingRequests: ChannelCreationRequestDocument[] = [];
+    const pendingChannelMessages: ChannelMessageDocument[] = [];
     const pendingMembershipDeletes: string[] = [];
     const result = await operation({
       insertChannel: (document) => { pendingChannels.push(document); return Promise.resolve(); },
@@ -44,14 +46,26 @@ const storage: ChannelStorage = {
       },
       findMembership: (channelId, userId) => Promise.resolve([...memberships.values()].find((item) =>
         item.channelId === channelId && item.userId === userId) ?? null),
+      findChannel: (workspaceId, channelId) => Promise.resolve(channels.get(channelId)?.workspaceId === workspaceId
+        ? channels.get(channelId) ?? null
+        : null),
+      updateChannelMetadata: (workspaceId, channelId, metadata) => {
+        const existing = channels.get(channelId);
+        if (!existing || existing.workspaceId !== workspaceId) return Promise.resolve(null);
+        const updated = Object.freeze({ ...existing, ...metadata });
+        pendingChannels.push(updated);
+        return Promise.resolve(updated);
+      },
       deleteMembership: (channelId, userId) => {
         pendingMembershipDeletes.push(`${channelId}:${userId}`);
         return Promise.resolve();
-      }
+      },
+      insertChannelMessage: (document) => { pendingChannelMessages.push(document); return Promise.resolve(); }
     });
     for (const document of pendingChannels) channels.set(document._id, document);
     for (const document of pendingMemberships) memberships.set(document._id, document);
     for (const document of pendingRequests) requests.set(document._id, document);
+    channelMessages.push(...pendingChannelMessages);
     for (const membershipId of pendingMembershipDeletes) memberships.delete(membershipId);
     return result;
   },
@@ -121,6 +135,22 @@ void test("persists channel and creator membership together and maps ids to publ
     cursor: null
   }), { channels: [channel], nextCursor: null });
   assert.deepEqual(await repository.findMembership("channel-1", "user-1"), creatorMembership);
+  const updatedAt = new Date("2026-10-13T00:00:00.000Z");
+  const updateChannel = repository.updateChannel;
+  assert.ok(updateChannel);
+  assert.deepEqual(await updateChannel("workspace-1", channel.id, "user-1", {
+    name: "general-updated",
+    description: "Updated details",
+    visibility: "private"
+  }, updatedAt), {
+    kind: "updated",
+    channel: { ...channel, name: "general-updated", description: "Updated details", visibility: "private", updatedAt }
+  });
+  assert.deepEqual(await updateChannel("workspace-1", channel.id, "user-2", {
+    name: "general",
+    description: null,
+    visibility: "public"
+  }, updatedAt), { kind: "channel-unavailable" });
   assert.equal(await repository.findByWorkspaceAndName("workspace-2", "general"), null);
 });
 
@@ -198,9 +228,27 @@ void test("joins public channels once and leaves without deleting channel record
   assert.deepEqual(await repository.removeMember("workspace-1", privateChannel.id, "owner", "invitee"), { kind: "already-absent" });
   assert.deepEqual(await repository.removeMember("workspace-1", channel.id, "owner", "member"), { kind: "not-private" });
 
-  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "owner"), { kind: "left" });
-  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "owner"), { kind: "already-left" });
-  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "member"), { kind: "left" });
+  const ownerDeparture = {
+    id: "departure-owner",
+    channelId: channel.id,
+    type: "system" as const,
+    systemEvent: "member_left" as const,
+    actor: { id: "owner", name: "Owner" },
+    text: "" as const,
+    createdAt: new Date("2026-10-26T00:00:00.000Z")
+  };
+  const memberDeparture = { ...ownerDeparture, id: "departure-member", actor: { id: "member", name: "Member" } };
+  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "owner", ownerDeparture), {
+    kind: "left",
+    entry: ownerDeparture
+  });
+  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "owner", ownerDeparture), { kind: "already-left" });
+  assert.deepEqual(await repository.leaveChannel("workspace-1", channel.id, "member", memberDeparture), {
+    kind: "left",
+    entry: memberDeparture
+  });
+  assert.equal(channelMessages.length, 2);
+  assert.equal(channelMessages[0]?.type, "system");
   assert.ok(await repository.findById("workspace-1", channel.id));
   assert.equal(await repository.findMembership(channel.id, "member"), null);
   assert.equal(await repository.findMembership(channel.id, "owner"), null);

@@ -1,6 +1,7 @@
 export { ChannelCreateDialog } from "./create-channel-dialog";
 export { ChannelMembersPanel } from "./channel-members-panel";
 export { ChannelMessages } from "./channel-messages";
+export { ChannelSystemMessageItem } from "./channel-system-message-item";
 export { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-provider";
 export type { ChannelRealtimeSocket, RealtimeConnectionStatus } from "./channel-realtime-provider";
 export { ChannelPage } from "./channel-page";

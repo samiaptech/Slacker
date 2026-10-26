@@ -7,11 +7,12 @@
     "dev": "tsx watch server.mts",
     "channels:initialize": "tsx scripts/initialize-channels.ts",
     "direct-messages:initialize": "tsx scripts/initialize-direct-messages.ts",
+    "notifications:initialize": "tsx scripts/initialize-notifications.ts",
     "workspaces:initialize": "tsx scripts/initialize-workspaces.ts",
     "build": "tsc -p tsconfig.build.json",
     "build:vercel": "pnpm --filter @workspace/logging run build && esbuild server.mts --bundle --minify --platform=node --format=esm --packages=bundle --outfile=vercel/server.mjs",
     "start": "node dist/server.mjs",
-    "test": "tsx --test features/health/tests/*.test.ts features/workspaces/tests/*.test.ts features/channels/tests/*.test.ts features/direct-messages/tests/*.test.ts features/message-search/tests/*.test.ts integrations/authentication/tests/*.test.ts integrations/cloudinary/tests/*.test.ts integrations/socket-io/tests/*.test.ts tests/direct-message-realtime.test.ts tests/environment.test.ts tests/http-boundaries.test.ts tests/legacy-workspace-migration.test.ts tests/mongodb.test.ts tests/shutdown.test.ts",
+    "test": "tsx --test middleware/tests/*.test.ts integrations/mongodb/tests/*.test.ts features/health/tests/*.test.ts features/workspaces/tests/*.test.ts features/channels/tests/*.test.ts features/direct-messages/tests/*.test.ts features/message-search/tests/*.test.ts features/notifications/tests/*.test.ts integrations/authentication/tests/*.test.ts integrations/cloudinary/tests/*.test.ts integrations/socket-io/tests/*.test.ts tests/direct-message-realtime.test.ts tests/environment.test.ts tests/http-boundaries.test.ts tests/legacy-workspace-migration.test.ts tests/mongodb.test.ts tests/shutdown.test.ts",
     "lint": "eslint \"**/*.{ts,mts}\"",
     "typecheck": "tsc --noEmit"
   },
@@ -26,9 +27,9 @@
     "express": "^5.2.1",
     "mongodb": "7.6.0",
     "mongoose": "^9.10.1",
-    "multer": "^2.4.0",
+    "multer": "2.5.0",
     "socket.io": "^4.8.4",
-    "zod": "^4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

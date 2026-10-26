@@ -1,20 +1,31 @@
 import { memo, type ReactElement } from "react";
 import Image from "next/image";
-import { Download, FileText } from "lucide-react";
-import { Button } from "@workspace/ui";
-import { MessageActions, type MessageDeleteScope } from "@/features/conversation-history/public";
+import { FileText } from "lucide-react";
+import {
+  MessageActions,
+  MessageAttachmentList,
+  MessageDeliveryIndicator,
+  type MessageAttachment,
+  type MessageDeliveryState,
+  type MessageDeleteScope
+} from "@/features/conversation-history/public";
 import type { DirectMessageView } from "../types";
 
 type DirectMessageAttachment = NonNullable<DirectMessageView["attachments"]>[number];
 
 type DirectMessageItemProps = Readonly<{
   message: DirectMessageView;
+  deliveryState?: MessageDeliveryState | undefined;
+  pendingFiles?: readonly File[] | undefined;
+  retryDisabled?: boolean;
+  onRetry: () => void;
   startsNewDay: boolean;
   isDownloadBusy: boolean;
   downloadingAttachmentId: string | null;
   canDeleteForEveryone: boolean;
   isDeleting: boolean;
   onDownloadAttachment: (attachment: DirectMessageAttachment) => void;
+  loadImagePreview: (attachment: MessageAttachment, signal: AbortSignal) => Promise<string>;
   onDelete: (scope: MessageDeleteScope) => void;
 }>;
 
@@ -33,10 +44,15 @@ const formatFileSize = (size: number): string => size < 1024 * 1024
 
 const DirectMessageItemView = ({
   message,
+  deliveryState,
+  pendingFiles = [],
+  retryDisabled = false,
+  onRetry,
   startsNewDay,
   isDownloadBusy,
   downloadingAttachmentId,
   onDownloadAttachment,
+  loadImagePreview,
   canDeleteForEveryone,
   isDeleting,
   onDelete
@@ -59,27 +75,29 @@ const DirectMessageItemView = ({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
           <time className="text-xs text-muted-foreground" dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
-          <MessageActions
-            canDeleteForEveryone={canDeleteForEveryone}
-            disabled={isDeleting}
-            onDelete={onDelete}
-          />
+          <MessageDeliveryIndicator onRetry={onRetry} retryDisabled={retryDisabled} state={deliveryState} />
+          {!deliveryState ? <MessageActions canDeleteForEveryone={canDeleteForEveryone} disabled={isDeleting} onDelete={onDelete} /> : null}
         </div>
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
-        {message.attachments?.length ? (
-          <ul aria-label="Message attachments" className="mt-3 flex flex-wrap gap-2">
-            {message.attachments.map((attachment) => (
-              <li key={attachment.id}>
-                <Button className="h-auto max-w-full justify-start gap-2 px-3 py-2 text-left" disabled={isDownloadBusy} onClick={() => onDownloadAttachment(attachment)} type="button" variant="outline">
-                  {downloadingAttachmentId === attachment.id
-                    ? <Download aria-hidden="true" className="size-4 animate-pulse" />
-                    : <FileText aria-hidden="true" className="size-4 shrink-0" />}
-                  <span className="min-w-0"><span className="block max-w-56 truncate text-xs">{attachment.name}</span><span className="block text-[10px] text-muted-foreground">{formatFileSize(attachment.size)}</span></span>
-                  <Download aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                </Button>
+        {message.text ? <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p> : null}
+        {pendingFiles.length > 0 ? (
+          <ul aria-label="Pending attachments" className="mt-3 flex flex-wrap gap-2">
+            {pendingFiles.map((file, index) => (
+              <li className="flex max-w-full items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs" key={`${file.name}-${file.lastModified}-${index}`}>
+                <FileText aria-hidden="true" className="size-4 shrink-0 text-primary" />
+                <span className="max-w-56 truncate">{file.name}</span>
+                <span className="text-muted-foreground">{formatFileSize(file.size)}</span>
               </li>
             ))}
           </ul>
+        ) : null}
+        {message.attachments?.length ? (
+          <MessageAttachmentList
+            attachments={message.attachments}
+            downloadingAttachmentId={downloadingAttachmentId}
+            isDownloadBusy={isDownloadBusy}
+            loadImagePreview={loadImagePreview}
+            onDownload={onDownloadAttachment}
+          />
         ) : null}
       </div>
     </li>

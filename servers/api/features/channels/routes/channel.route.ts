@@ -8,6 +8,7 @@ import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/ind
 import {
   createChannelController,
   createGetChannelController,
+  createUpdateChannelController,
   createJoinChannelController,
   createLeaveChannelController,
   createInviteChannelMemberController,
@@ -26,6 +27,7 @@ import {
 import type { ChannelService } from "../services/index.js";
 import type { ChannelMessageService } from "../services/index.js";
 import type { ChannelRealtimePublisher } from "../realtime/index.js";
+import type { NotificationService } from "../../notifications/public/index.js";
 
 export type ChannelRouteDependencies = Readonly<{
   getIdentity: (headers: IncomingHttpHeaders) => Promise<ChannelWorkspaceIdentity | null>;
@@ -38,6 +40,7 @@ export type ChannelRouteDependencies = Readonly<{
   messageService: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
   realtime?: ChannelRealtimePublisher;
+  notifications?: NotificationService;
 }>;
 
 const uploadParser = multer({
@@ -85,17 +88,26 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     getChannelForMember: dependencies.service.getForMember
   }));
+  router.patch("/channels/:channelId", createUpdateChannelController({
+    getIdentity: dependencies.getIdentity,
+    getWorkspaceAccess: dependencies.getWorkspaceAccess,
+    updateChannel: dependencies.service.update,
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
+  }));
   router.get("/channels/:channelId/messages", createListChannelMessagesController({
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
-    service: dependencies.messageService
+    service: dependencies.messageService,
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   }));
   const messageDependencies = {
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     service: dependencies.messageService,
     ...(dependencies.attachmentStorage ? { attachmentStorage: dependencies.attachmentStorage } : {}),
-    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   };
   router.post(
     "/channels/:channelId/messages",
@@ -120,13 +132,15 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     joinPublicChannel: dependencies.service.joinPublicChannel,
-    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   }));
   router.delete("/channels/:channelId/memberships", createLeaveChannelController({
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     leaveChannel: dependencies.service.leaveChannel,
-    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   }));
   router.get("/channels/:channelId/memberships", createListChannelMembersController({
     getIdentity: dependencies.getIdentity,
@@ -138,13 +152,15 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     inviteMember: dependencies.service.inviteMember,
-    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   }));
   router.delete("/channels/:channelId/memberships/:userId", createRemoveChannelMemberController({
     getIdentity: dependencies.getIdentity,
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     removeMember: dependencies.service.removeMember,
-    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {})
+    ...(dependencies.realtime ? { realtime: dependencies.realtime } : {}),
+    ...(dependencies.notifications ? { notifications: dependencies.notifications } : {})
   }));
   return router;
 };

@@ -20,9 +20,14 @@ export type ChannelCreationRequestDocument = Readonly<{
 export type ChannelMessageDocument = Readonly<{
   _id: string;
   channelId: string;
-  senderId: string;
+  senderId?: string;
   text: string;
   createdAt: Date;
+  type?: "message" | "system";
+  systemEvent?: "member_left";
+  actorId?: string;
+  actorName?: string;
+  leftAt?: Date;
   attachments?: readonly ChatAttachmentRecord[];
   hiddenForUserIds?: readonly string[];
 }>;
@@ -98,22 +103,37 @@ export const CHANNEL_CREATION_REQUESTS_COLLECTION_VALIDATOR = Object.freeze({
 export const CHANNEL_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
   $jsonSchema: Object.freeze({
     bsonType: "object",
-    anyOf: Object.freeze([
+    oneOf: Object.freeze([
       Object.freeze({
-        required: Object.freeze(["text"]),
-        properties: Object.freeze({ text: Object.freeze({ minLength: 1 }) })
+        required: Object.freeze(["senderId"]),
+        anyOf: Object.freeze([
+          Object.freeze({ required: Object.freeze(["text"]), properties: Object.freeze({ text: Object.freeze({ minLength: 1 }) }) }),
+          Object.freeze({ required: Object.freeze(["attachments"]), properties: Object.freeze({ attachments: Object.freeze({ minItems: 1 }) }) })
+        ])
       }),
       Object.freeze({
-        required: Object.freeze(["attachments"]),
-        properties: Object.freeze({ attachments: Object.freeze({ minItems: 1 }) })
+        required: Object.freeze(["type", "systemEvent", "actorId", "actorName", "leftAt"]),
+        properties: Object.freeze({
+          type: Object.freeze({ enum: ["system"] }),
+          systemEvent: Object.freeze({ enum: ["member_left"] }),
+          text: Object.freeze({ enum: [""] }),
+          actorId: Object.freeze({ bsonType: "string", minLength: 1 }),
+          actorName: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
+          leftAt: Object.freeze({ bsonType: "date" })
+        })
       })
     ]),
-    required: ["_id", "channelId", "senderId", "text", "createdAt"],
+    required: ["_id", "channelId", "text", "createdAt"],
     additionalProperties: false,
     properties: Object.freeze({
       _id: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
       channelId: Object.freeze({ bsonType: "string", minLength: 1 }),
       senderId: Object.freeze({ bsonType: "string", minLength: 1 }),
+      type: Object.freeze({ enum: ["message", "system"] }),
+      systemEvent: Object.freeze({ enum: ["member_left"] }),
+      actorId: Object.freeze({ bsonType: "string", minLength: 1 }),
+      actorName: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
+      leftAt: Object.freeze({ bsonType: "date" }),
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
       hiddenForUserIds: Object.freeze({

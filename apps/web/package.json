@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "pnpm --filter @workspace/ui run build && next build",
     "start": "next start",
-    "test": "tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/workspace-response.test.ts tests/channels.test.ts tests/channel-submission.test.ts tests/conversation-history.test.ts tests/message-search.test.ts",
+    "test": "tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/security-policy.test.ts tests/workspace-response.test.ts tests/channels.test.ts tests/channel-submission.test.ts tests/conversation-history.test.ts tests/message-search.test.ts tests/notifications.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
@@ -19,7 +19,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "socket.io-client": "^4.8.4",
-    "zod": "^4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

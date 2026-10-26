@@ -1,5 +1,6 @@
 export { createChannelController } from "./channel.controller.js";
 export { createGetChannelController } from "./channel.controller.js";
+export { createUpdateChannelController } from "./channel.controller.js";
 export { createListChannelsController } from "./channel.controller.js";
 export {
   createInviteChannelMemberController,

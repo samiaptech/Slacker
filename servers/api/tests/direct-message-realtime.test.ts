@@ -23,7 +23,7 @@ type TestSocket = Socket<RealtimeServerEvents, RealtimeClientEvents>;
 const createTestSocket = (origin: string, identity: string): TestSocket =>
   createClient(origin, {
     autoConnect: false,
-    extraHeaders: { Cookie: `session=${identity}` },
+    extraHeaders: { Cookie: `session=${identity}`, Origin: "http://localhost:3000" },
     reconnection: false,
     timeout: 2_000
   });

@@ -5,6 +5,7 @@ import type { Socket } from "socket.io";
 import type { SocketIoApi, AuthenticatedSocketData } from "../../../integrations/socket-io/index.js";
 import type { AuthenticationIdentity } from "../../../integrations/authentication/index.js";
 import type { ChannelService } from "../services/index.js";
+import type { ChannelSystemEntry } from "../domain/index.js";
 
 type ChannelSocket = Socket<
   RealtimeClientEvents,
@@ -19,6 +20,7 @@ export type ChannelRealtimePublisher = Readonly<{
   publishChannelListChanged: (workspaceId: string) => void;
   publishWorkspaceMembersChanged: (workspaceId: string) => void;
   publishMembersChanged: (workspaceId: string, channelId: string) => void;
+  publishSystemEntry?: (workspaceId: string, entry: ChannelSystemEntry) => void;
   revokeChannelAccess: (workspaceId: string, channelId: string, userId: string) => void;
   revokeWorkspaceAccess: (workspaceId: string, userId: string) => void;
 }>;
@@ -259,6 +261,24 @@ export const createChannelRealtime = ({
     },
     publishMembersChanged: (workspaceId, channelId) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:members:changed", { channelId });
+    },
+    publishSystemEntry: (workspaceId, entry) => {
+      const emitter = io as unknown as Readonly<{
+        to: (room: string) => Readonly<{
+          except: (room: string) => Readonly<{ emit: (event: string, payload: unknown) => void }>;
+        }>;
+      }>;
+      emitter.to(channelRoom(workspaceId, entry.channelId))
+        .except(userRoom(entry.actor.id))
+        .emit("channel:system:new", Object.freeze({
+          id: entry.id,
+          channelId: entry.channelId,
+          type: entry.type,
+          systemEvent: entry.systemEvent,
+          actor: entry.actor,
+          text: entry.text,
+          createdAt: entry.createdAt.toISOString()
+        }));
     },
     revokeChannelAccess: (workspaceId, channelId, userId) => {
       const room = channelRoom(workspaceId, channelId);

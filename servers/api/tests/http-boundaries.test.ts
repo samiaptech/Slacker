@@ -8,6 +8,7 @@ import type { AuthenticationIntegration } from "../integrations/index.js";
 import type { ApiConfig } from "../types/index.js";
 import type { ChannelMessageService } from "../features/channels/index.js";
 import { createWorkspaceServiceFixture } from "./workspace-service-fixture.js";
+import { allowApiRateLimit } from "./rate-limit-fixture.js";
 
 const logger: Logger = {
   info: () => undefined,
@@ -53,13 +54,18 @@ const channelMessageService: ChannelMessageService = {
 };
 
 void test("unknown routes use the API error boundary", async (context) => {
-  const server = createServer({ app: createApp({ config, logger, authentication, channelService, channelMessageService, workspaceService }), config, logger });
+  const server = createServer({ app: createApp({ config, logger, rateLimiter: allowApiRateLimit, trustVercelForwardedFor: false, authentication, channelService, channelMessageService, workspaceService }), config, logger });
   await server.start();
   context.after(async () => { await server.stop(); });
   const address = server.raw.address();
   assert.ok(address && typeof address === "object");
   const response = await fetch(`http://127.0.0.1:${String(address.port)}/missing`);
   assert.equal(response.status, HTTP_STATUS.notFound);
+  assert.equal(response.headers.get("content-security-policy"), "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'");
+  assert.equal(response.headers.get("cross-origin-resource-policy"), "same-origin");
+  assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.deepEqual(await response.json(), {
     error: {
       code: ERROR_CODES.routeNotFound,
@@ -70,8 +76,41 @@ void test("unknown routes use the API error boundary", async (context) => {
 
 });
 
+void test("applies the API-wide limit to health and unknown routes but not CORS preflights", async (context) => {
+  const keys: string[] = [];
+  const server = createServer({
+    app: createApp({
+      config,
+      logger,
+      rateLimiter: {
+        consume: (key) => {
+          keys.push(key);
+          return Promise.resolve({ allowed: true, retryAfterSeconds: 0 });
+        }
+      },
+      trustVercelForwardedFor: false,
+      authentication,
+      channelService,
+      channelMessageService,
+      workspaceService
+    }),
+    config,
+    logger
+  });
+  await server.start();
+  context.after(async () => { await server.stop(); });
+  const address = server.raw.address();
+  assert.ok(address && typeof address === "object");
+  const origin = `http://127.0.0.1:${String(address.port)}`;
+
+  assert.equal((await fetch(`${origin}/health`)).status, 200);
+  assert.equal((await fetch(`${origin}/missing`)).status, 404);
+  assert.equal((await fetch(`${origin}/health`, { method: "OPTIONS" })).status, 204);
+  assert.deepEqual(keys, ["api:127.0.0.1", "api:127.0.0.1"]);
+});
+
 void test("CORS preflight allows credentialed channel requests with workspace and idempotency headers", async (context) => {
-  const server = createServer({ app: createApp({ config, logger, authentication, channelService, channelMessageService, workspaceService }), config, logger });
+  const server = createServer({ app: createApp({ config, logger, rateLimiter: allowApiRateLimit, trustVercelForwardedFor: false, authentication, channelService, channelMessageService, workspaceService }), config, logger });
   await server.start();
   context.after(async () => { await server.stop(); });
   const address = server.raw.address();
@@ -87,6 +126,7 @@ void test("CORS preflight allows credentialed channel requests with workspace an
   });
 
   assert.equal(response.status, HTTP_STATUS.noContent);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("access-control-allow-origin"), config.webOrigin);
   assert.equal(response.headers.get("access-control-allow-credentials"), "true");
   assert.match(response.headers.get("access-control-allow-headers") ?? "", /Idempotency-Key/i);
@@ -102,7 +142,7 @@ void test("does not log workspace invitation tokens or OAuth callback codes", as
     error: (_message, context) => { logEntries.push(JSON.stringify(context)); }
   };
   const server = createServer({
-    app: createApp({ config, logger: captureLogger, authentication, channelService, channelMessageService, workspaceService }),
+    app: createApp({ config, logger: captureLogger, rateLimiter: allowApiRateLimit, trustVercelForwardedFor: false, authentication, channelService, channelMessageService, workspaceService }),
     config,
     logger: captureLogger
   });

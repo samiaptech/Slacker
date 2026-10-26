@@ -51,7 +51,8 @@ void test("maps newest-first storage pages to chronological output with an ID cu
     channelId: "channel-1",
     senderId: "user-1",
     text: "new",
-    createdAt
+    createdAt,
+    type: "message"
   });
 });
 

@@ -23,9 +23,11 @@ import type {
   InviteChannelMemberServiceResult,
   JoinChannelServiceResult,
   LeaveChannelServiceResult,
-  RemoveChannelMemberServiceResult
+  RemoveChannelMemberServiceResult,
+  UpdateChannelServiceResult
 } from "../services/index.js";
 import type { ChannelRealtimePublisher } from "../realtime/index.js";
+import { isNotificationStorageUnavailable, type NotificationService } from "../../notifications/public/index.js";
 
 export type ChannelWorkspaceIdentity = Readonly<{ id: string; name: string; email: string; image: string | null }>;
 export type ChannelWorkspaceAccessResult =
@@ -46,6 +48,14 @@ const requestSchema = z.object({
 }).strict();
 
 const idempotencyKeySchema = z.string().trim().min(1).max(128);
+const normalizeNotificationFailure = (error: unknown): unknown =>
+  isNotificationStorageUnavailable(error)
+    ? createApplicationError({
+      code: ERROR_CODES.internal,
+      message: "Notifications are temporarily unavailable.",
+      status: HTTP_STATUS.serviceUnavailable
+    })
+    : error;
 
 export type ChannelAccessDependencies = Readonly<{
   getIdentity: (headers: IncomingHttpHeaders) => Promise<ChannelWorkspaceIdentity | null>;
@@ -64,23 +74,28 @@ type GetChannelControllerDependencies = ChannelAccessDependencies & Readonly<{
 type ListChannelsControllerDependencies = ChannelAccessDependencies & Readonly<{
   listChannels: ChannelService["listChannels"];
 }>;
+type UpdateChannelControllerDependencies = ChannelAccessDependencies & Readonly<{
+  updateChannel?: ChannelService["update"];
+  realtime?: Pick<ChannelRealtimePublisher, "publishChannelListChanged">;
+  notifications?: Pick<NotificationService, "notifyChannelActivity">;
+}>;
 
 type ChangeMembershipControllerDependencies = ChannelAccessDependencies & Readonly<{
-  changeMembership: (workspaceId: string, channelId: string, userId: string) => Promise<
+  changeMembership: (workspaceId: string, channelId: string, userId: string, actorName: string) => Promise<
     JoinChannelServiceResult | LeaveChannelServiceResult
   >;
-  realtime?: Pick<ChannelRealtimePublisher,
-    "publishChannelListChanged" | "publishMembersChanged" | "revokeChannelAccess">;
+  realtime?: MembershipRealtimePublisher;
+  notifications?: Pick<NotificationService, "notifyChannelActivity">;
 }>;
 type MembershipRealtimePublisher = Pick<ChannelRealtimePublisher,
-  "publishChannelListChanged" | "publishMembersChanged" | "revokeChannelAccess">;
+  "publishChannelListChanged" | "publishMembersChanged" | "revokeChannelAccess" | "publishSystemEntry">;
 
 type ChannelMemberControllerDependencies = ChannelAccessDependencies & Readonly<{
   listMembers: ChannelService["listMembers"];
   inviteMember: ChannelService["inviteMember"];
   removeMember: ChannelService["removeMember"];
-  realtime?: Pick<ChannelRealtimePublisher,
-    "publishChannelListChanged" | "publishMembersChanged" | "revokeChannelAccess">;
+  realtime?: MembershipRealtimePublisher;
+  notifications?: Pick<NotificationService, "notifyChannelActivity">;
 }>;
 
 const channelListQuerySchema = z.object({
@@ -92,6 +107,113 @@ const channelListQuerySchema = z.object({
 const inviteMemberSchema = z.object({
   email: z.string().trim().pipe(z.email().max(254)).transform((email) => email.toLowerCase())
 }).strict();
+const updateChannelSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(500).nullable().default(null),
+  visibility: z.enum(["public", "private"])
+}).strict();
+
+export const createUpdateChannelController = (
+  { getIdentity, getWorkspaceAccess, updateChannel, realtime, notifications }: UpdateChannelControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendChannelAccessError(access, next);
+      return;
+    }
+    const channelId = request.params.channelId;
+    const parsed = updateChannelSchema.safeParse(request.body);
+    if (typeof channelId !== "string" || !channelId || !parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest
+      }));
+      return;
+    }
+    const result: UpdateChannelServiceResult = updateChannel
+      ? await updateChannel(
+        access.access.workspace.id,
+        channelId,
+        access.access.user.id,
+        {
+          name: parsed.data.name,
+          description: parsed.data.description ?? "",
+          visibility: parsed.data.visibility
+        }
+      )
+      : Object.freeze({ kind: "unavailable" as const });
+    switch (result.kind) {
+      case "unavailable":
+        next(createApplicationError({
+          code: ERROR_CODES.channelStorageUnavailable,
+          message: ERROR_MESSAGES.channelStorageUnavailable,
+          status: HTTP_STATUS.serviceUnavailable
+        }));
+        return;
+      case "channel-unavailable":
+        next(createApplicationError({
+          code: ERROR_CODES.routeNotFound,
+          message: ERROR_MESSAGES.channelUnavailable,
+          status: HTTP_STATUS.notFound
+        }));
+        return;
+      case "not-manager":
+        next(createApplicationError({
+          code: ERROR_CODES.channelMembershipConflict,
+          message: ERROR_MESSAGES.channelMembershipConflict,
+          status: HTTP_STATUS.forbidden
+        }));
+        return;
+      case "conflict":
+        next(createApplicationError({
+          code: ERROR_CODES.channelNameConflict,
+          message: ERROR_MESSAGES.channelNameConflict,
+          status: HTTP_STATUS.conflict
+        }));
+        return;
+      case "invalid":
+        next(createApplicationError({
+          code: ERROR_CODES.validation,
+          message: ERROR_MESSAGES.validation,
+          status: HTTP_STATUS.badRequest,
+          details: { field: "channel", reason: result.error }
+        }));
+        return;
+      case "updated": {
+        const channel = result.channel;
+        realtime?.publishChannelListChanged(access.access.workspace.id);
+        await notifications?.notifyChannelActivity({
+          workspaceId: access.access.workspace.id,
+          channelId,
+          type: "channel_updated",
+          actor: { id: access.access.user.id, name: access.access.user.name },
+          createdAt: channel.updatedAt
+        });
+        const body: ChannelResponse = {
+          id: channel.id,
+          workspaceId: channel.workspaceId,
+          name: channel.name,
+          description: channel.description,
+          visibility: channel.visibility,
+          lifecycleState: channel.lifecycleState,
+          createdBy: channel.createdBy,
+          createdAt: channel.createdAt.toISOString(),
+          updatedAt: channel.updatedAt.toISOString(),
+          archivedAt: channel.archivedAt?.toISOString() ?? null
+        };
+        response.status(HTTP_STATUS.ok).json({ channel: body });
+        return;
+      }
+      default:
+        return;
+    }
+  } catch (error: unknown) {
+    next(normalizeNotificationFailure(error));
+  }
+};
 
 const toResponse = (result: Extract<CreateChannelServiceResult, { kind: "created" }>): ChannelCreateResponse => ({
   channel: {
@@ -202,7 +324,7 @@ export const createChannelController = ({
       realtime?.publishChannelListChanged(workspaceAccess.access.workspace.id);
       response.status(HTTP_STATUS.created).json(toResponse(result));
     } catch (error: unknown) {
-      next(error);
+      next(normalizeNotificationFailure(error));
     }
   };
 
@@ -245,7 +367,7 @@ export const createListChannelsController = ({ getIdentity, getWorkspaceAccess, 
       };
       response.status(HTTP_STATUS.ok).json(result);
     } catch (error: unknown) {
-      next(error);
+      next(normalizeNotificationFailure(error));
     }
   };
 
@@ -283,7 +405,7 @@ export const createGetChannelController = ({ getIdentity, getWorkspaceAccess, ge
       }
       response.status(HTTP_STATUS.ok).json(toChannelResponse(channel));
     } catch (error: unknown) {
-      next(error);
+      next(normalizeNotificationFailure(error));
     }
   };
 
@@ -440,7 +562,7 @@ export const createListChannelMembersController = (
     };
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -449,8 +571,9 @@ export const createInviteChannelMemberController = (
     getIdentity,
     getWorkspaceAccess,
     inviteMember,
-    realtime
-  }: ChannelAccessDependencies & Pick<ChannelMemberControllerDependencies, "inviteMember" | "realtime">
+    realtime,
+    notifications
+  }: ChannelAccessDependencies & Pick<ChannelMemberControllerDependencies, "inviteMember" | "realtime" | "notifications">
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -491,10 +614,18 @@ export const createInviteChannelMemberController = (
     if (result.kind === "added") {
       realtime?.publishChannelListChanged(workspaceAccess.access.workspace.id);
       realtime?.publishMembersChanged(workspaceAccess.access.workspace.id, channelId);
+      await notifications?.notifyChannelActivity({
+        workspaceId: workspaceAccess.access.workspace.id,
+        channelId,
+        type: "channel_member_joined",
+        actor: { id: workspaceAccess.access.user.id, name: workspaceAccess.access.user.name },
+        eventId: `joined:${channelId}:${result.membership.userId}:${result.membership.joinedAt.toISOString()}`,
+        createdAt: result.membership.joinedAt
+      });
     }
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
@@ -503,8 +634,9 @@ export const createRemoveChannelMemberController = (
     getIdentity,
     getWorkspaceAccess,
     removeMember,
-    realtime
-  }: ChannelAccessDependencies & Pick<ChannelMemberControllerDependencies, "removeMember" | "realtime">
+    realtime,
+    notifications
+  }: ChannelAccessDependencies & Pick<ChannelMemberControllerDependencies, "removeMember" | "realtime" | "notifications">
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -537,15 +669,21 @@ export const createRemoveChannelMemberController = (
       realtime?.publishChannelListChanged(workspaceAccess.access.workspace.id);
       realtime?.publishMembersChanged(workspaceAccess.access.workspace.id, channelId);
       realtime?.revokeChannelAccess(workspaceAccess.access.workspace.id, channelId, userId);
+      await notifications?.notifyChannelActivity({
+        workspaceId: workspaceAccess.access.workspace.id,
+        channelId,
+        type: "channel_member_left",
+        actor: { id: workspaceAccess.access.user.id, name: workspaceAccess.access.user.name }
+      });
     }
     response.status(HTTP_STATUS.noContent).end();
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
 const createChangeMembershipController = (
-  { getIdentity, getWorkspaceAccess, changeMembership, realtime }: ChangeMembershipControllerDependencies,
+  { getIdentity, getWorkspaceAccess, changeMembership, realtime, notifications }: ChangeMembershipControllerDependencies,
   method: "join" | "leave"
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
@@ -567,7 +705,8 @@ const createChangeMembershipController = (
     const result = await changeMembership(
       workspaceAccess.access.workspace.id,
       channelId,
-      workspaceAccess.access.user.id
+      workspaceAccess.access.user.id,
+      workspaceAccess.access.user.name
     );
     if (result.kind === "unavailable" || result.kind === "not-public" || result.kind === "channel-unavailable") {
       next(membershipResultError(result));
@@ -582,6 +721,15 @@ const createChangeMembershipController = (
           channelId,
           workspaceAccess.access.user.id
         );
+        realtime?.publishSystemEntry?.(workspaceAccess.access.workspace.id, result.entry);
+        await notifications?.notifyChannelActivity({
+          workspaceId: workspaceAccess.access.workspace.id,
+          channelId,
+          type: "channel_member_left",
+          actor: { id: workspaceAccess.access.user.id, name: workspaceAccess.access.user.name },
+          eventId: result.entry.id,
+          createdAt: result.entry.createdAt
+        });
       }
       response.status(HTTP_STATUS.noContent).end();
       return;
@@ -603,33 +751,45 @@ const createChangeMembershipController = (
     if (result.kind === "joined") {
       realtime?.publishChannelListChanged(workspaceAccess.access.workspace.id);
       realtime?.publishMembersChanged(workspaceAccess.access.workspace.id, channelId);
+      await notifications?.notifyChannelActivity({
+        workspaceId: workspaceAccess.access.workspace.id,
+        channelId,
+        type: "channel_member_joined",
+        actor: { id: workspaceAccess.access.user.id, name: workspaceAccess.access.user.name },
+        eventId: `joined:${channelId}:${result.membership.userId}:${result.membership.joinedAt.toISOString()}`,
+        createdAt: result.membership.joinedAt
+      });
     }
     response.status(HTTP_STATUS.ok).json({ membership });
   } catch (error: unknown) {
-    next(error);
+    next(normalizeNotificationFailure(error));
   }
 };
 
 export const createJoinChannelController = (dependencies: ChannelAccessDependencies & Readonly<{
   joinPublicChannel: ChannelService["joinPublicChannel"];
   realtime?: MembershipRealtimePublisher;
+  notifications?: Pick<NotificationService, "notifyChannelActivity">;
 }>): RequestHandler => {
-  const { joinPublicChannel, realtime, ...accessDependencies } = dependencies;
+  const { joinPublicChannel, realtime, notifications, ...accessDependencies } = dependencies;
   return createChangeMembershipController({
     ...accessDependencies,
     changeMembership: joinPublicChannel,
-    ...(realtime ? { realtime } : {})
+    ...(realtime ? { realtime } : {}),
+    ...(notifications ? { notifications } : {})
   }, "join");
 };
 
 export const createLeaveChannelController = (dependencies: ChannelAccessDependencies & Readonly<{
   leaveChannel: ChannelService["leaveChannel"];
   realtime?: MembershipRealtimePublisher;
+  notifications?: Pick<NotificationService, "notifyChannelActivity">;
 }>): RequestHandler => {
-  const { leaveChannel, realtime, ...accessDependencies } = dependencies;
+  const { leaveChannel, realtime, notifications, ...accessDependencies } = dependencies;
   return createChangeMembershipController({
     ...accessDependencies,
     changeMembership: leaveChannel,
-    ...(realtime ? { realtime } : {})
+    ...(realtime ? { realtime } : {}),
+    ...(notifications ? { notifications } : {})
   }, "leave");
 };
