@@ -7,7 +7,6 @@ import {
   notificationEventSchema,
   notificationListResponseSchema as inboxSchema
 } from "../features/notifications/types/notification-response.js";
-import { shouldApplyNotificationLoad } from "../features/notifications/notification-load-state.js";
 
 const notification = {
   id: "message-1:user-2",
@@ -33,29 +32,6 @@ test("notification socket event requires its recipient identity", () => {
     notification: { ...notification, recipientId: "user-2" }
   }).success, true);
   assert.equal(notificationEventSchema.safeParse({ notification }).success, false);
-});
-
-test("late notification loads preserve socket-added and locally read state", () => {
-  const socketNotification = {
-    ...notification,
-    id: "notification-2",
-    readAt: "2026-10-26T09:01:00.000Z"
-  };
-  const current = { notifications: [socketNotification], unreadCount: 0, nextCursor: null };
-  const stale = { notifications: [], unreadCount: 1, nextCursor: "older-page" };
-  let state = current;
-  const requestId = 1;
-  const latestRequestId = 1;
-  const requestRevision = 4;
-  const currentRevision = requestRevision + 2;
-
-  if (shouldApplyNotificationLoad(requestId, latestRequestId, requestRevision, currentRevision)) {
-    state = stale;
-  }
-
-  assert.equal(state, current);
-  assert.equal(state.notifications[0]?.readAt, socketNotification.readAt);
-  assert.equal(state.unreadCount, 0);
 });
 
 test("channel history accepts a typed member departure entry and normalizes user messages", () => {

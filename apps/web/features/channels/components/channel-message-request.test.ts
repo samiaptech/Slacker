@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createChannelMessageRequestCache } from "../features/channels/components/channel-message-request";
+import { createChannelMessageRequestCache } from "./channel-message-request";
 
 const request = {
   apiBaseUrl: "http://localhost:4000",
