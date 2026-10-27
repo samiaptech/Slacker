@@ -8,7 +8,7 @@ import {
 import type { DirectConversationDocument, DirectMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { MessageReactionEmoji } from "@workspace/types";
-import type { StoredMessageReaction } from "../../message-reactions/index.js";
+import type { StoredMessageReaction } from "../../message-reactions/public/index.js";
 
 export type DirectMessageOpenStorageResult =
   Readonly<{ kind: "opened"; conversation: DirectConversationDocument; created: boolean }>;

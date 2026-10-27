@@ -13,7 +13,7 @@ import {
   MESSAGE_REACTIONS_COLLECTION,
   MESSAGE_REACTIONS_COLLECTION_VALIDATOR,
   MESSAGE_REACTIONS_INDEXES
-} from "../../message-reactions/index.js";
+} from "../../message-reactions/public/index.js";
 import { createMongoDirectMessageStorage } from "../integrations/index.js";
 
 const collectionDefinitions = [

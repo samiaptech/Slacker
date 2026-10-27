@@ -7,7 +7,7 @@ import {
 } from "../domain/index.js";
 import type { ChannelMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
-import type { StoredMessageReaction } from "../../message-reactions/index.js";
+import type { StoredMessageReaction } from "../../message-reactions/public/index.js";
 import type { MessageReactionEmoji } from "@workspace/types";
 
 export type ChannelMessageStorageResult =

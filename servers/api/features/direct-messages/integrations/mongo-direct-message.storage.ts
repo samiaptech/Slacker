@@ -19,7 +19,7 @@ import {
   type MessageReactionDocument,
   type StoredMessageReaction,
   toggleStoredMessageReaction
-} from "../../message-reactions/index.js";
+} from "../../message-reactions/public/index.js";
 
 const storageUnavailable = Object.assign(new Error("Direct message storage is unavailable."), {
   kind: "direct-message-storage-unavailable" as const

@@ -5,7 +5,7 @@ import {
   type ChannelMessagePageQuery
 } from "../domain/index.js";
 import type { MessageReactionEmoji, MessageReactionResponse } from "@workspace/types";
-import type { StoredMessageReaction } from "../../message-reactions/index.js";
+import type { StoredMessageReaction } from "../../message-reactions/public/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
 import { isChannelStorageUnavailableError } from "../repositories/index.js";

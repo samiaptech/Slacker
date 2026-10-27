@@ -12,7 +12,7 @@ import {
   MESSAGE_REACTIONS_COLLECTION,
   MESSAGE_REACTIONS_COLLECTION_VALIDATOR,
   MESSAGE_REACTIONS_INDEXES
-} from "../../message-reactions/index.js";
+} from "../../message-reactions/public/index.js";
 import { createMongoChannelMessageStorage } from "../integrations/index.js";
 
 void test("accepts MongoDB's normalized representation of the channel message text index", async () => {

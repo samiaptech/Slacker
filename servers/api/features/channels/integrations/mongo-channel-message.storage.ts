@@ -23,7 +23,7 @@ import {
   type MessageReactionDocument,
   type StoredMessageReaction,
   toggleStoredMessageReaction
-} from "../../message-reactions/index.js";
+} from "../../message-reactions/public/index.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
