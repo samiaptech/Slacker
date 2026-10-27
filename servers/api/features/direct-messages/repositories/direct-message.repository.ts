@@ -7,6 +7,8 @@ import {
 } from "../domain/index.js";
 import type { DirectConversationDocument, DirectMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
+import type { MessageReactionEmoji } from "@workspace/types";
+import type { StoredMessageReaction } from "../../message-reactions/index.js";
 
 export type DirectMessageOpenStorageResult =
   Readonly<{ kind: "opened"; conversation: DirectConversationDocument; created: boolean }>;
@@ -51,6 +53,20 @@ export type DirectMessageStorage = Readonly<{
     scope: DirectMessageDeleteScope,
     isWorkspaceAdmin: boolean
   ) => Promise<DirectMessageDeleteResult>;
+  listReactionsForMember?: (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageIds: readonly string[]
+  ) => Promise<readonly StoredMessageReaction[]>;
+  toggleReactionForMember?: (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    emoji: MessageReactionEmoji,
+    now: Date
+  ) => Promise<Readonly<{ kind: "updated"; reactions: readonly StoredMessageReaction[] }> | Readonly<{ kind: "not-found" }>>;
   findAttachmentForMember?: (
     workspaceId: string,
     conversationId: string,
@@ -151,6 +167,12 @@ export const createDirectMessageRepository = (storage: DirectMessageStorage) => 
     toMessageDocument(message)
   ),
   deleteMessageForMember: storage.deleteMessageForMember,
+  ...(storage.listReactionsForMember
+    ? { listReactionsForMember: storage.listReactionsForMember }
+    : {}),
+  ...(storage.toggleReactionForMember
+    ? { toggleReactionForMember: storage.toggleReactionForMember }
+    : {}),
   ...(storage.findAttachmentForMember
     ? { findAttachmentForMember: storage.findAttachmentForMember }
     : {})

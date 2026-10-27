@@ -154,6 +154,7 @@ void test("authorizes direct-message rooms and delivers only to conversation par
       text: "Private",
       createdAt: "2026-10-20T00:00:01.000Z",
       attachments: [],
+      reactions: [],
       sender: { id: "alice", name: "Alice", image: null }
     };
     const received = new Promise<DirectMessageResponse>((resolve) => bob.once("direct-message:new", resolve));

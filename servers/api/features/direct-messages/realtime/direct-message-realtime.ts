@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { Logger } from "@workspace/logging";
-import type { DirectMessageResponse, RealtimeClientEvents, RealtimeServerEvents } from "@workspace/types";
+import type {
+  DirectMessageResponse,
+  MessageReactionToggleResponse,
+  RealtimeClientEvents,
+  RealtimeServerEvents
+} from "@workspace/types";
 import type { Socket } from "socket.io";
 import type { AuthenticatedSocketData, SocketIoApi } from "../../../integrations/socket-io/index.js";
 import type { DirectMessageService } from "../services/index.js";
@@ -15,6 +20,11 @@ type DirectMessageSocket = Socket<
 export type DirectMessageRealtimePublisher = Readonly<{
   publishDirectMessage: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, conversationId: string, messageId: string) => void;
+  publishMessageReactions: (
+    workspaceId: string,
+    conversationId: string,
+    payload: MessageReactionToggleResponse
+  ) => void;
   publishConversationChanged: (workspaceId: string) => void;
 }>;
 
@@ -149,6 +159,12 @@ export const createDirectMessageRealtime = ({
       io.to(directMessageRoom(workspaceId, conversationId)).emit("direct-message:deleted", {
         conversationId,
         messageId
+      });
+    },
+    publishMessageReactions: (workspaceId, conversationId, payload) => {
+      io.to(directMessageRoom(workspaceId, conversationId)).emit("direct-message:reactions", {
+        conversationId,
+        ...payload
       });
     },
     publishConversationChanged: (workspaceId) => {

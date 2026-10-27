@@ -7,6 +7,8 @@ import {
   type DirectMessageDeleteScope,
   type DirectMessagePageQuery
 } from "../domain/index.js";
+import type { MessageReactionEmoji, MessageReactionResponse } from "@workspace/types";
+import type { StoredMessageReaction } from "../../message-reactions/index.js";
 import type { DirectMessageRepository } from "../repositories/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
@@ -17,7 +19,10 @@ import {
 
 export type DirectParticipant = Readonly<{ id: string; name: string; image: string | null }>;
 export type DirectConversationWithParticipant = DirectConversation & Readonly<{ otherParticipant: DirectParticipant }>;
-export type DirectMessageWithSender = DirectMessage & Readonly<{ sender: DirectParticipant }>;
+export type DirectMessageWithSender = DirectMessage & Readonly<{
+  sender: DirectParticipant;
+  reactions: readonly MessageReactionResponse[];
+}>;
 
 export type DirectMessageService = ReturnType<typeof createDirectMessageService>;
 
@@ -172,6 +177,15 @@ export const createDirectMessageService = ({
       const senderIds = [...new Set(result.messages.map(({ senderId }) => senderId))];
       const profiles = await findUsersByIds(senderIds);
       const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const reactionGroups = repository.listReactionsForMember
+        ? await repository.listReactionsForMember(
+          workspaceId,
+          conversationId,
+          userId,
+          result.messages.map(({ id }) => id)
+        )
+        : Object.freeze([]);
+      const reactionsByMessage = await resolveReactions(reactionGroups, findUsersByIds);
       return Object.freeze({
         kind: "listed" as const,
         messages: Object.freeze(result.messages.map((message) => {
@@ -182,7 +196,8 @@ export const createDirectMessageService = ({
               id: message.senderId,
               name: profile?.name || "Former member",
               image: profile?.image ?? null
-            })
+            }),
+            reactions: reactionsByMessage.get(message.id) ?? Object.freeze([])
           });
         })),
         nextCursor: result.nextCursor
@@ -257,7 +272,8 @@ export const createDirectMessageService = ({
             id: userId,
             name: profile?.name || "Former member",
             image: profile?.image ?? null
-          })
+          }),
+          reactions: Object.freeze([])
         })
       });
     } catch (error: unknown) {
@@ -295,5 +311,65 @@ export const createDirectMessageService = ({
       if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" });
       throw error;
     }
+  },
+  toggleReaction: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    emoji: MessageReactionEmoji
+  ) => {
+    try {
+      if (!repository.toggleReactionForMember) return Object.freeze({ kind: "not-found" as const });
+      const result = await repository.toggleReactionForMember(
+        workspaceId,
+        conversationId,
+        userId,
+        messageId,
+        emoji,
+        now()
+      );
+      if (result.kind !== "updated") return Object.freeze({ kind: "not-found" as const });
+      const reactionsByMessage = await resolveReactions(result.reactions, findUsersByIds);
+      return Object.freeze({
+        kind: "updated" as const,
+        messageId,
+        reactions: reactionsByMessage.get(messageId) ?? Object.freeze([])
+      });
+    } catch (error: unknown) {
+      if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });
+      throw error;
+    }
   }
 });
+
+const resolveReactions = async (
+  groups: readonly StoredMessageReaction[],
+  findUsersByIds: DirectMessageServiceDependencies["findUsersByIds"]
+): Promise<ReadonlyMap<string, readonly MessageReactionResponse[]>> => {
+  const userIds = [...new Set(groups.flatMap(({ userIds: ids }) => ids))];
+  const profiles = await findUsersByIds(userIds);
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const reactionsByMessage = new Map<string, MessageReactionResponse[]>();
+  for (const group of groups) {
+    const reaction: MessageReactionResponse = Object.freeze({
+      emoji: group.emoji,
+      count: group.count,
+      users: Object.freeze(group.userIds.map((id) => {
+        const profile = profilesById.get(id);
+        return Object.freeze({
+          id,
+          name: profile?.name || "Former member",
+          image: profile?.image ?? null
+        });
+      })),
+      usersTruncated: group.usersTruncated,
+      reactedByMe: group.reactedByMe
+    });
+    const messageReactions = reactionsByMessage.get(group.messageId) ?? [];
+    messageReactions.push(reaction);
+    reactionsByMessage.set(group.messageId, messageReactions);
+  }
+  return new Map([...reactionsByMessage].map(([messageId, reactions]) =>
+    [messageId, Object.freeze(reactions)]));
+};

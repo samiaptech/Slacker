@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { Logger } from "@workspace/logging";
-import type { ChannelMessageResponse, RealtimeClientEvents, RealtimeServerEvents } from "@workspace/types";
+import type {
+  ChannelMessageResponse,
+  MessageReactionToggleResponse,
+  RealtimeClientEvents,
+  RealtimeServerEvents
+} from "@workspace/types";
 import type { Socket } from "socket.io";
 import type { SocketIoApi, AuthenticatedSocketData } from "../../../integrations/socket-io/index.js";
 import type { AuthenticationIdentity } from "../../../integrations/authentication/index.js";
@@ -17,6 +22,11 @@ type ChannelSocket = Socket<
 export type ChannelRealtimePublisher = Readonly<{
   publishMessage: (workspaceId: string, channelId: string, message: ChannelMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, channelId: string, messageId: string) => void;
+  publishMessageReactions: (
+    workspaceId: string,
+    channelId: string,
+    payload: MessageReactionToggleResponse
+  ) => void;
   publishChannelListChanged: (workspaceId: string) => void;
   publishWorkspaceMembersChanged: (workspaceId: string) => void;
   publishMembersChanged: (workspaceId: string, channelId: string) => void;
@@ -252,6 +262,12 @@ export const createChannelRealtime = ({
     },
     publishMessageDeleted: (workspaceId, channelId, messageId) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:message:deleted", { channelId, messageId });
+    },
+    publishMessageReactions: (workspaceId, channelId, payload) => {
+      io.to(channelRoom(workspaceId, channelId)).emit("channel:message:reactions", {
+        channelId,
+        ...payload
+      });
     },
     publishChannelListChanged: (workspaceId) => {
       io.to(workspaceRoom(workspaceId)).emit("workspace:channels:changed");

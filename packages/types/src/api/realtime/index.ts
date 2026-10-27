@@ -1,6 +1,7 @@
 import type { ChannelMessageResponse, ChannelSystemEventResponse } from "../channels/index.js";
 import type { DirectMessageResponse } from "../direct-messages/index.js";
 import type { NotificationResponse } from "./notifications.js";
+import type { MessageReactionToggleResponse } from "../chat/index.js";
 
 export type {
   NotificationListResponse,
@@ -31,6 +32,7 @@ export type RealtimeServerEvents = Readonly<{
   "channel:message:new": (message: ChannelMessageResponse) => void;
   "channel:system:new": (entry: ChannelSystemEventResponse) => void;
   "channel:message:deleted": (payload: Readonly<{ channelId: string; messageId: string }>) => void;
+  "channel:message:reactions": (payload: Readonly<{ channelId: string } & MessageReactionToggleResponse>) => void;
   "channel:members:changed": (payload: Readonly<{ channelId: string }>) => void;
   "channel:access:revoked": (payload: Readonly<{ workspaceId: string; channelId: string }>) => void;
   "channel:typing": (payload: Readonly<{ channelId: string; userId: string; active: boolean }>) => void;
@@ -38,6 +40,7 @@ export type RealtimeServerEvents = Readonly<{
   "direct-message:ready": (payload: Readonly<{ conversationId: string }>) => void;
   "direct-message:new": (message: DirectMessageResponse) => void;
   "direct-message:deleted": (payload: Readonly<{ conversationId: string; messageId: string }>) => void;
+  "direct-message:reactions": (payload: Readonly<{ conversationId: string } & MessageReactionToggleResponse>) => void;
   "direct-message:typing": (payload: Readonly<{ conversationId: string; userId: string; active: boolean }>) => void;
   "notification:new": (payload: Readonly<{ notification: NotificationResponse & Readonly<{ recipientId: string }> }>) => void;
   "notification:unread-count": (payload: Readonly<{ unreadCount: number }>) => void;

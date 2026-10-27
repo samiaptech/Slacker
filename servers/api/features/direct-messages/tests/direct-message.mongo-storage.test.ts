@@ -9,6 +9,11 @@ import {
   DIRECT_MESSAGES_COLLECTION_VALIDATOR,
   DIRECT_MESSAGES_INDEXES
 } from "../models/index.js";
+import {
+  MESSAGE_REACTIONS_COLLECTION,
+  MESSAGE_REACTIONS_COLLECTION_VALIDATOR,
+  MESSAGE_REACTIONS_INDEXES
+} from "../../message-reactions/index.js";
 import { createMongoDirectMessageStorage } from "../integrations/index.js";
 
 const collectionDefinitions = [
@@ -21,6 +26,11 @@ const collectionDefinitions = [
     name: DIRECT_MESSAGES_COLLECTION,
     validator: DIRECT_MESSAGES_COLLECTION_VALIDATOR,
     indexes: DIRECT_MESSAGES_INDEXES
+  },
+  {
+    name: MESSAGE_REACTIONS_COLLECTION,
+    validator: MESSAGE_REACTIONS_COLLECTION_VALIDATOR,
+    indexes: MESSAGE_REACTIONS_INDEXES
   }
 ];
 
@@ -47,7 +57,10 @@ void test("accepts MongoDB's normalized direct-message text index during readine
               ? { _fts: "text", _ftsx: 1 }
             : index.keys,
             ...(Object.values(index.keys).includes("text") ? { weights: { text: 1 } } : {}),
-            unique: index.options.unique
+            unique: index.options.unique,
+            ...(index.options.name === "message_reaction_active_user_unique"
+              ? { partialFilterExpression: { active: true } }
+              : {})
             })) ?? []
         );
       },
@@ -66,8 +79,8 @@ void test("accepts MongoDB's normalized direct-message text index during readine
   await storage.listForMember("workspace-1", "user-1");
 
   assert.deepEqual(result, []);
-  assert.equal(metadataReads, 2);
-  assert.equal(indexReads, 2);
+  assert.equal(metadataReads, 3);
+  assert.equal(indexReads, 3);
 });
 
 void test("scopes DM deletion to participants, persists personal hides, and applies admin override", async () => {
@@ -96,7 +109,10 @@ void test("scopes DM deletion to participants, persists personal hides, and appl
         name: index.options.name,
         key: Object.values(index.keys).includes("text") ? { _fts: "text", _ftsx: 1 } : index.keys,
         ...(Object.values(index.keys).includes("text") ? { weights: { text: 1 } } : {}),
-        unique: index.options.unique
+        unique: index.options.unique,
+        ...(index.options.name === "message_reaction_active_user_unique"
+          ? { partialFilterExpression: { active: true } }
+          : {})
       })) ?? []),
       findOne: (filter: Readonly<Record<string, unknown>>) => {
         if (name === DIRECT_MESSAGES_COLLECTION) attachmentFilter = filter;
@@ -124,6 +140,10 @@ void test("scopes DM deletion to participants, persists personal hides, and appl
       deleteOne: () => {
         calls.push({ name, operation: "delete" });
         return Promise.resolve({ deletedCount: 1 });
+      },
+      deleteMany: () => {
+        calls.push({ name, operation: "deleteMany" });
+        return Promise.resolve({ deletedCount: 0 });
       }
     })
   } as unknown as MongoDatabase;

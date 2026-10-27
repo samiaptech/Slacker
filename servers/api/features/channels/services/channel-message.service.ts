@@ -4,6 +4,8 @@ import {
   type ChannelMessageDeleteScope,
   type ChannelMessagePageQuery
 } from "../domain/index.js";
+import type { MessageReactionEmoji, MessageReactionResponse } from "@workspace/types";
+import type { StoredMessageReaction } from "../../message-reactions/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
 import { isChannelStorageUnavailableError } from "../repositories/index.js";
@@ -20,7 +22,10 @@ export type ChannelMessageSender = Readonly<{
   image: string | null;
 }>;
 
-export type ChannelMessageWithSender = ChannelMessage & Readonly<{ sender: ChannelMessageSender }>;
+export type ChannelMessageWithSender = ChannelMessage & Readonly<{
+  sender: ChannelMessageSender;
+  reactions: readonly MessageReactionResponse[];
+}>;
 
 export type ChannelMessagePageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageWithSender[]; nextCursor: string | null }>
@@ -77,6 +82,15 @@ export const createChannelMessageService = ({
         "senderId" in message ? [message.senderId] : []
       ))]);
       const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const reactionGroups = repository.listReactionsForMember
+        ? await repository.listReactionsForMember(
+          workspaceId,
+          channelId,
+          userId,
+          result.messages.map(({ id }) => id)
+        )
+        : Object.freeze([]);
+      const reactionsByMessage = await resolveReactions(reactionGroups, findUsersByIds);
       return Object.freeze({
         kind: "listed",
         nextCursor: result.nextCursor,
@@ -89,7 +103,8 @@ export const createChannelMessageService = ({
               id: message.senderId,
               name: profile?.name || "Former member",
               image: profile?.image ?? null
-            })
+            }),
+            reactions: reactionsByMessage.get(message.id) ?? Object.freeze([])
           });
         }))
       });
@@ -167,7 +182,8 @@ export const createChannelMessageService = ({
             id: userId,
             name: profile?.name || "Former member",
             image: profile?.image ?? null
-          })
+          }),
+          reactions: Object.freeze([])
         })
       });
     } catch (error: unknown) {
@@ -202,6 +218,35 @@ export const createChannelMessageService = ({
       throw error;
     }
   },
+  toggleReaction: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    emoji: MessageReactionEmoji
+  ) => {
+    try {
+      if (!repository.toggleReactionForMember) return Object.freeze({ kind: "not-found" as const });
+      const result = await repository.toggleReactionForMember(
+        workspaceId,
+        channelId,
+        userId,
+        messageId,
+        emoji,
+        now()
+      );
+      if (result.kind !== "updated") return Object.freeze({ kind: "not-found" as const });
+      const reactionsByMessage = await resolveReactions(result.reactions, findUsersByIds);
+      return Object.freeze({
+        kind: "updated" as const,
+        messageId,
+        reactions: reactionsByMessage.get(messageId) ?? Object.freeze([])
+      });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" as const });
+      throw error;
+    }
+  },
   delete: async (
     workspaceId: string,
     channelId: string,
@@ -233,3 +278,34 @@ export const createChannelMessageService = ({
     }
   }
 });
+
+const resolveReactions = async (
+  groups: readonly StoredMessageReaction[],
+  findUsersByIds: ChannelMessageServiceDependencies["findUsersByIds"]
+): Promise<ReadonlyMap<string, readonly MessageReactionResponse[]>> => {
+  const userIds = [...new Set(groups.flatMap(({ userIds: ids }) => ids))];
+  const profiles = await findUsersByIds(userIds);
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const reactionsByMessage = new Map<string, MessageReactionResponse[]>();
+  for (const group of groups) {
+    const reaction: MessageReactionResponse = Object.freeze({
+      emoji: group.emoji,
+      count: group.count,
+      users: Object.freeze(group.userIds.map((id) => {
+        const profile = profilesById.get(id);
+        return Object.freeze({
+          id,
+          name: profile?.name || "Former member",
+          image: profile?.image ?? null
+        });
+      })),
+      usersTruncated: group.usersTruncated,
+      reactedByMe: group.reactedByMe
+    });
+    const messageReactions = reactionsByMessage.get(group.messageId) ?? [];
+    messageReactions.push(reaction);
+    reactionsByMessage.set(group.messageId, messageReactions);
+  }
+  return new Map([...reactionsByMessage].map(([messageId, reactions]) =>
+    [messageId, Object.freeze(reactions)]));
+};

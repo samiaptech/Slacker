@@ -15,6 +15,7 @@ export {
   createListChannelMessagesController,
   createSendChannelMessageController
 } from "./channel-message.controller.js";
+export { createToggleChannelMessageReactionController } from "./channel-message.controller.js";
 export type {
   ChannelAccessDependencies,
   ChannelMemberEmailVisibilityResult,

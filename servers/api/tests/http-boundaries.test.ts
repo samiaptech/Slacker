@@ -50,7 +50,8 @@ const channelMessageService: ChannelMessageService = {
   list: () => Promise.resolve({ kind: "channel-unavailable" }),
   send: () => Promise.resolve({ kind: "channel-unavailable" }),
   getAttachment: () => Promise.resolve({ kind: "not-found" }),
-  delete: () => Promise.resolve({ kind: "not-found" })
+  delete: () => Promise.resolve({ kind: "not-found" }),
+  toggleReaction: () => Promise.resolve({ kind: "not-found" })
 };
 
 void test("unknown routes use the API error boundary", async (context) => {

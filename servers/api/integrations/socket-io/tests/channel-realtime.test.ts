@@ -151,6 +151,7 @@ void test("authenticates sockets and scopes live channel events to workspace mem
       senderId: "alice",
       text: "Live from the server",
       createdAt: "2026-10-16T00:00:01.000Z",
+      reactions: [],
       sender: { id: "alice", name: "Alice", image: null }
     };
     const receivedMessage = new Promise((resolve) => bob.once("channel:message:new", resolve));

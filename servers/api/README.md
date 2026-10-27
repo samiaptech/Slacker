@@ -16,6 +16,61 @@ Rate-limit storage keys are SHA-256 hashes, not raw IP addresses or message-sear
 Message search has an additional 30-requests-per-authenticated-user rolling-minute limit.
 It shares the same MongoDB storage and returns the existing search-specific 429 response.
 
+# Persistent message reactions
+
+Authenticated channel members and direct-message participants can toggle one of the shared
+emoji allowlist entries:
+
+```http
+POST /channels/:channelId/messages/:messageId/reactions
+X-Workspace-Id: workspace-id
+Content-Type: application/json
+
+{ "emoji": "👍" }
+```
+
+For direct messages, use
+`POST /direct-messages/:conversationId/messages/:messageId/reactions`. A successful
+toggle returns `200` with `Cache-Control: no-store`:
+
+```json
+{
+  "messageId": "message-id",
+  "reactions": [{
+    "emoji": "👍",
+    "count": 2,
+    "users": [{ "id": "user-id", "name": "Member", "image": null }],
+    "usersTruncated": false,
+    "reactedByMe": true
+  }]
+}
+```
+
+Counts are exact; at most 10 user identities are returned per emoji, with
+`usersTruncated` indicating that the identity list was capped. Message history and send
+responses include the same reaction summaries. Unsupported emoji returns
+`400 validation_error`; missing, hidden, or inaccessible messages return 404. Channel
+storage rechecks active channel membership, and DM storage rechecks conversation
+participation, inside the persistence transaction.
+
+Each user can have at most one active emoji reaction on a given message. Selecting a
+different emoji replaces that user's previous reaction; selecting the already-active emoji
+removes it. Other users' reactions are unaffected. A partial unique index enforces this
+invariant under concurrent requests. Initialization keeps the most recently updated active
+reaction for each user/message pair and deactivates older duplicates before creating that
+index.
+
+Successful toggles publish `channel:message:reactions` to the channel room or
+`direct-message:reactions` to the DM room. Reactions are stored in the shared
+`message_reactions` collection. “Delete for everyone” removes the associated reactions;
+“Delete for me” only hides that message from the requesting user's history.
+
+The existing `channels:initialize` and `direct-messages:initialize` commands both
+initialize/update the shared reaction collection and its indexes, including the one-active-
+reaction constraint. The root
+`pnpm run initialize` runs them sequentially. API startup does not run schema migrations;
+run the root initializer against the intended database before deployment.
+
 # Realtime session lifecycle
 
 Socket.IO validates the Better Auth session during the connection handshake and revalidates

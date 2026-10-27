@@ -30,6 +30,8 @@ const member = { id: "member-1", name: "Member", email: "member@example.test", i
 
 void test("uses authenticated workspace role for DM global deletion while requiring participants", async (context) => {
   const requestedRoles: boolean[] = [];
+  const reactionCalls: unknown[][] = [];
+  const now = new Date("2026-10-27T00:00:00.000Z");
   const storage: DirectMessageStorage = {
     initialize: () => Promise.resolve(),
     openForMember: () => Promise.reject(new Error("Not used by this test.")),
@@ -42,14 +44,31 @@ void test("uses authenticated workspace role for DM global deletion while requir
       return Promise.resolve(isWorkspaceAdmin
         ? { kind: "deleted" as const, attachments: [] }
         : { kind: "forbidden" as const });
+    },
+    toggleReactionForMember: (...args) => {
+      reactionCalls.push(args);
+      if (args[2] !== member.id) return Promise.resolve({ kind: "not-found" as const });
+      return Promise.resolve({
+        kind: "updated" as const,
+        reactions: [{
+          messageId: args[3],
+          emoji: args[4],
+          count: 1,
+          userIds: [member.id],
+          usersTruncated: false,
+          reactedByMe: true
+        }]
+      });
     }
   };
   const directMessageService = createDirectMessageService({
     repository: createDirectMessageRepository(storage),
     isWorkspaceMember: () => Promise.resolve("member"),
     createId: () => "unused",
-    now: () => new Date(),
-    findUsersByIds: () => Promise.resolve([])
+    now: () => now,
+    findUsersByIds: (userIds) => Promise.resolve(
+      [admin, member].filter((identity) => userIds.includes(identity.id))
+    )
   });
   const workspaceFixture = createWorkspaceServiceFixture();
   workspaceFixture.seed("workspace-1", [admin.id, member.id]);
@@ -68,7 +87,8 @@ void test("uses authenticated workspace role for DM global deletion while requir
     list: () => Promise.resolve({ kind: "channel-unavailable" }),
     send: () => Promise.resolve({ kind: "channel-unavailable" }),
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
-    delete: () => Promise.resolve({ kind: "not-found" })
+    delete: () => Promise.resolve({ kind: "not-found" }),
+    toggleReaction: () => Promise.resolve({ kind: "not-found" })
   };
   const channelService: Parameters<typeof createApp>[0]["channelService"] = {
     create: () => Promise.resolve({ kind: "unavailable" }),
@@ -112,4 +132,35 @@ void test("uses authenticated workspace role for DM global deletion while requir
   assert.equal((await deleteMessage(admin.id)).status, 204);
   assert.equal((await deleteMessage(member.id)).status, 403);
   assert.deepEqual(requestedRoles, [true, false]);
+
+  const reactionEndpoint = `${endpoint}/reactions`;
+  const toggleReaction = (identity: string, emoji: string) => fetch(reactionEndpoint, {
+    method: "POST",
+    headers: {
+      "x-workspace-id": "workspace-1",
+      "x-test-identity": identity,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ emoji })
+  });
+  const reacted = await toggleReaction(member.id, "👍");
+  assert.equal(reacted.status, 200);
+  assert.equal(reacted.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await reacted.json(), {
+    messageId: "message-1",
+    reactions: [{
+      emoji: "👍",
+      count: 1,
+      users: [{ id: member.id, name: member.name, image: null }],
+      usersTruncated: false,
+      reactedByMe: true
+    }]
+  });
+  assert.deepEqual(reactionCalls, [[
+    "workspace-1", "conversation-1", member.id, "message-1", "👍", now
+  ]]);
+
+  assert.equal((await toggleReaction(admin.id, "👍")).status, 404);
+  assert.equal((await toggleReaction(member.id, "🧨")).status, 400);
+  assert.equal(reactionCalls.length, 2);
 });

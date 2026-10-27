@@ -11,6 +11,15 @@ import {
   type DirectMessageDocument
 } from "../models/index.js";
 import type { DirectMessageStorage } from "../repositories/index.js";
+import {
+  assertMessageReactionsInitialized,
+  initializeMessageReactions,
+  listStoredMessageReactions,
+  MESSAGE_REACTIONS_COLLECTION,
+  type MessageReactionDocument,
+  type StoredMessageReaction,
+  toggleStoredMessageReaction
+} from "../../message-reactions/index.js";
 
 const storageUnavailable = Object.assign(new Error("Direct message storage is unavailable."), {
   kind: "direct-message-storage-unavailable" as const
@@ -55,6 +64,7 @@ const assertCollection = async (
       name?: string;
       key: unknown;
       unique?: boolean;
+      partialFilterExpression?: unknown;
       weights?: unknown;
     }>[]>;
   }>
@@ -90,6 +100,7 @@ export const createMongoDirectMessageStorage = (
 ): DirectMessageStorage => {
   const conversations = database.collection<DirectConversationDocument>(DIRECT_CONVERSATIONS_COLLECTION);
   const messages = database.collection<DirectMessageDocument>(DIRECT_MESSAGES_COLLECTION);
+  const reactions = database.collection<MessageReactionDocument>(MESSAGE_REACTIONS_COLLECTION);
   let readiness: Promise<void> | null = null;
   const ensureReady = async (): Promise<void> => {
     if (!readiness) {
@@ -106,8 +117,11 @@ export const createMongoDirectMessageStorage = (
           indexes: DIRECT_MESSAGES_INDEXES,
           readIndexes: () => messages.indexes()
         })
-      ]).then(() => undefined).catch((error: unknown) => {
-        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+      ]).then(() => assertMessageReactionsInitialized(database)).then(() => undefined).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)
+          || (isRecord(error) && error.kind === "message-reaction-storage-unavailable")) {
+          throw storageUnavailable;
+        }
         throw error;
       });
     }
@@ -129,6 +143,7 @@ export const createMongoDirectMessageStorage = (
       for (const index of DIRECT_MESSAGES_INDEXES) {
         await messages.createIndex(index.keys, index.options);
       }
+      await initializeMessageReactions(database);
     },
     openForMember: async (workspaceId, draft) => {
       await ensureReady();
@@ -264,6 +279,12 @@ export const createMongoDirectMessageStorage = (
           }
           const deleted = await messages.deleteOne({ _id: messageId, workspaceId, conversationId }, { session });
           if (deleted.deletedCount === 0) return Object.freeze({ kind: "not-found" as const });
+          await reactions.deleteMany({
+            workspaceId,
+            scope: "direct-message",
+            parentId: conversationId,
+            messageId
+          }, { session });
           return Object.freeze({
             kind: "deleted" as const,
             attachments: Object.freeze([...(message.attachments ?? [])])
@@ -272,6 +293,81 @@ export const createMongoDirectMessageStorage = (
       } catch (error: unknown) {
         if (isUnsupportedTransaction(error)) throw storageUnavailable;
         throw error;
+      }
+    },
+    listReactionsForMember: async (workspaceId, conversationId, userId, messageIds) => {
+      if (messageIds.length === 0) return Object.freeze([]);
+      await ensureReady();
+      return withTransaction(async (session) => {
+        const conversation = await conversations.findOne({
+          _id: conversationId,
+          workspaceId,
+          participantIds: userId
+        }, { session });
+        if (!conversation) return Object.freeze([]);
+        return listStoredMessageReactions(database, session, {
+          workspaceId,
+          scope: "direct-message",
+          parentId: conversationId,
+          messageIds,
+          userId
+        });
+      }).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      });
+    },
+    toggleReactionForMember: async (workspaceId, conversationId, userId, messageId, emoji, now) => {
+      await ensureReady();
+      const toggle = async (retryDuplicate: boolean): Promise<Readonly<{
+        kind: "updated";
+        reactions: readonly StoredMessageReaction[];
+      }> | Readonly<{ kind: "not-found" }>> => withTransaction(async (session) => {
+        const conversation = await conversations.findOne({
+          _id: conversationId,
+          workspaceId,
+          participantIds: userId
+        }, { session });
+        const message = await messages.findOne({
+          _id: messageId,
+          workspaceId,
+          conversationId,
+          hiddenForUserIds: { $nin: [userId] }
+        }, { session });
+        if (!conversation || !message) return Object.freeze({ kind: "not-found" as const });
+        try {
+          await toggleStoredMessageReaction(database, session, {
+            workspaceId,
+            scope: "direct-message",
+            parentId: conversationId,
+            messageId,
+            userId,
+            emoji,
+            now
+          });
+        } catch (error: unknown) {
+          if (!retryDuplicate || !isDuplicateKey(error)) throw error;
+          throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+            kind: "message-reaction-duplicate-retry" as const
+          });
+        }
+        const groups = await listStoredMessageReactions(database, session, {
+          workspaceId,
+          scope: "direct-message",
+          parentId: conversationId,
+          messageIds: [messageId],
+          userId
+        });
+        return Object.freeze({ kind: "updated" as const, reactions: groups });
+      }).catch((error: unknown) => {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      });
+      try {
+        return await toggle(true);
+      } catch (error: unknown) {
+        if (!isRecord(error) || error.kind !== "message-reaction-duplicate-retry") throw error;
+        return toggle(false);
       }
     }
   });

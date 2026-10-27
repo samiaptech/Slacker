@@ -87,6 +87,7 @@ void test("broadcasts realtime events across Socket.IO instances through MongoDB
       senderId: "test-user",
       text: "Delivered across instances",
       createdAt: new Date().toISOString(),
+      reactions: [],
       sender: { id: "test-user", name: "Test User", image: null }
     };
     const received = new Promise<unknown>((resolve, reject) => {

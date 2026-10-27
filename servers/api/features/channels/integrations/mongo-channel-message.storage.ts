@@ -15,12 +15,22 @@ import {
   type ChannelDocument
 } from "../models/index.js";
 import type { ChannelMessageStorage, ChannelMessageStorageResult } from "../repositories/index.js";
+import {
+  assertMessageReactionsInitialized,
+  initializeMessageReactions,
+  listStoredMessageReactions,
+  MESSAGE_REACTIONS_COLLECTION,
+  type MessageReactionDocument,
+  type StoredMessageReaction,
+  toggleStoredMessageReaction
+} from "../../message-reactions/index.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const isCollectionAlreadyExists = (error: unknown): boolean =>
   isRecord(error) && error.code === 48;
+const isDuplicateKey = (error: unknown): boolean => isRecord(error) && error.code === 11000;
 
 const storageUnavailable = Object.assign(new Error("Channel message storage is unavailable."), {
   kind: "channel-storage-unavailable" as const
@@ -51,6 +61,7 @@ const assertInitialized = async (
       name?: string;
       key: unknown;
       unique?: boolean;
+      partialFilterExpression?: unknown;
       weights?: unknown;
     }>[]>
   }>
@@ -77,6 +88,11 @@ const assertInitialized = async (
       throw storageUnavailable;
     }
   }
+  try {
+    await assertMessageReactionsInitialized(database);
+  } catch {
+    throw storageUnavailable;
+  }
 };
 
 export const createMongoChannelMessageStorage = (
@@ -86,6 +102,7 @@ export const createMongoChannelMessageStorage = (
   const messages = database.collection<ChannelMessageDocument>(CHANNEL_MESSAGES_COLLECTION);
   const channels = database.collection<ChannelDocument>(CHANNELS_COLLECTION);
   const memberships = database.collection<ChannelMembershipDocument>(CHANNEL_MEMBERSHIPS_COLLECTION);
+  const reactions = database.collection<MessageReactionDocument>(MESSAGE_REACTIONS_COLLECTION);
   let readiness: Promise<void> | null = null;
   const ensureReady = async (): Promise<void> => {
     if (!readiness) readiness = assertInitialized(database, messages);
@@ -116,6 +133,7 @@ export const createMongoChannelMessageStorage = (
       for (const index of CHANNEL_MESSAGES_INDEXES) {
         await messages.createIndex(index.keys, index.options);
       }
+      await initializeMessageReactions(database);
     },
     findForMember: async (workspaceId, channelId, userId, query): Promise<ChannelMessageStorageResult> => {
       await ensureReady();
@@ -200,11 +218,86 @@ export const createMongoChannelMessageStorage = (
         }
         const deleted = await messages.deleteOne({ _id: messageId, channelId }, { session });
         if (deleted.deletedCount === 0) return Object.freeze({ kind: "not-found" as const });
+        await reactions.deleteMany({
+          workspaceId,
+          scope: "channel",
+          parentId: channelId,
+          messageId
+        }, { session });
         return Object.freeze({
           kind: "deleted" as const,
           attachments: Object.freeze([...(message.attachments ?? [])])
         });
       });
+    },
+    listReactionsForMember: async (workspaceId, channelId, userId, messageIds) => {
+        if (messageIds.length === 0) return Object.freeze([]);
+        await ensureReady();
+        return runTransaction(async (session) => {
+          const channel = await channels.findOne(
+            { _id: channelId, workspaceId, lifecycleState: "active" },
+            { session }
+          );
+          const membership = await memberships.findOne({ channelId, userId }, { session });
+          if (!channel || !membership) return Object.freeze([]);
+          return listStoredMessageReactions(database, session, {
+            workspaceId,
+            scope: "channel",
+            parentId: channelId,
+            messageIds,
+            userId
+          });
+        });
+    },
+    toggleReactionForMember: async (workspaceId, channelId, userId, messageId, emoji, now) => {
+        await ensureReady();
+        const toggle = async (retryDuplicate: boolean): Promise<Readonly<{
+          kind: "updated";
+          reactions: readonly StoredMessageReaction[];
+        }> | Readonly<{ kind: "not-found" }>> => runTransaction(async (session) => {
+          const channel = await channels.findOne(
+            { _id: channelId, workspaceId, lifecycleState: "active" },
+            { session }
+          );
+          const membership = await memberships.findOne({ channelId, userId }, { session });
+          const message = await messages.findOne({
+            _id: messageId,
+            channelId,
+            senderId: { $exists: true },
+            hiddenForUserIds: { $nin: [userId] }
+          }, { session });
+          if (!channel || !membership || !message) return Object.freeze({ kind: "not-found" as const });
+          try {
+            await toggleStoredMessageReaction(database, session, {
+              workspaceId,
+              scope: "channel",
+              parentId: channelId,
+              messageId,
+              userId,
+              emoji,
+              now
+            });
+          } catch (error: unknown) {
+            if (!retryDuplicate || !isDuplicateKey(error)) throw error;
+            throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+              kind: "message-reaction-duplicate-retry" as const
+            });
+          }
+          const groups = await listStoredMessageReactions(database, session, {
+            workspaceId,
+            scope: "channel",
+            parentId: channelId,
+            messageIds: [messageId],
+            userId
+          });
+          return Object.freeze({ kind: "updated" as const, reactions: groups });
+        });
+        try {
+          return await toggle(true);
+        } catch (error: unknown) {
+          if (!isRecord(error) || error.kind !== "message-reaction-duplicate-retry") throw error;
+          return toggle(false);
+        }
     }
   });
 };

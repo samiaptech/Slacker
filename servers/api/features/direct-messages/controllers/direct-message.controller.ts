@@ -7,6 +7,10 @@ import type {
   DirectMessageListResponse,
   DirectMessageResponse
 } from "@workspace/types";
+import {
+  MESSAGE_REACTION_EMOJI,
+  type MessageReactionToggleResponse
+} from "@workspace/types";
 import { z } from "zod";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
 import { createApplicationError } from "../../../errors/index.js";
@@ -31,6 +35,11 @@ type DirectWorkspaceAccessResult =
 type DirectMessageRealtime = Readonly<{
   publishDirectMessage: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, conversationId: string, messageId: string) => void;
+  publishMessageReactions: (
+    workspaceId: string,
+    conversationId: string,
+    payload: MessageReactionToggleResponse
+  ) => void;
   publishConversationChanged: (workspaceId: string) => void;
 }>;
 type ControllerDependencies = Readonly<{
@@ -61,6 +70,7 @@ const messageBodySchema = z.object({
     .refine((text) => Array.from(text).length <= DIRECT_MESSAGE_MAX_LENGTH)
 }).strict();
 const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
+const reactionBodySchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJI) }).strict();
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(DIRECT_MESSAGE_PAGE_SIZE_MAX)
     .default(DIRECT_MESSAGE_PAGE_SIZE_DEFAULT),
@@ -106,6 +116,7 @@ const toMessageResponse = (message: DirectMessageWithSender): DirectMessageRespo
     senderId: message.senderId,
     text: message.text,
     createdAt: message.createdAt.toISOString(),
+    reactions: message.reactions,
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment): ChatAttachmentResponse => ({
     id: attachment.id,
     name: attachment.name,
@@ -115,6 +126,58 @@ const toMessageResponse = (message: DirectMessageWithSender): DirectMessageRespo
     })) } : {}),
     sender: message.sender
   };
+};
+
+export const createToggleDirectMessageReactionController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendAccessError(access.kind, next);
+      return;
+    }
+    const { conversationId, messageId } = request.params;
+    if (typeof conversationId !== "string" || typeof messageId !== "string"
+      || !conversationId || !messageId) {
+      sendNotFound(next);
+      return;
+    }
+    const parsed = reactionBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "emoji", reason: "unsupported_emoji" }
+      }));
+      return;
+    }
+    const result = await service.toggleReaction(
+      access.workspaceId,
+      conversationId,
+      access.userId,
+      messageId,
+      parsed.data.emoji
+    );
+    if (result.kind === "unavailable") {
+      sendUnavailable(next);
+      return;
+    }
+    if (result.kind === "not-found") {
+      sendNotFound(next);
+      return;
+    }
+    const body: MessageReactionToggleResponse = {
+      messageId: result.messageId,
+      reactions: result.reactions
+    };
+    realtime?.publishMessageReactions(access.workspaceId, conversationId, body);
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
 };
 
 const sendAccessError = (kind: RequestAccessResult["kind"], next: Parameters<RequestHandler>[2]): void => {

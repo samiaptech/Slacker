@@ -6,5 +6,6 @@ export {
   createListDirectMessagesController,
   createOpenDirectMessageController,
   createSendDirectMessageController,
+  createToggleDirectMessageReactionController,
   createDownloadDirectMessageAttachmentController
 } from "./direct-message.controller.js";

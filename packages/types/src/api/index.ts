@@ -9,6 +9,13 @@ export type {
   NotificationType
 } from "./realtime/index.js";
 export type { ChatAttachmentResponse } from "./chat/index.js";
+export {
+  MESSAGE_REACTION_EMOJI,
+  type MessageReactionEmoji,
+  type MessageReactionResponse,
+  type MessageReactionToggleResponse,
+  type MessageReactionUserResponse
+} from "./chat/index.js";
 export type { MessageSearchResponse, MessageSearchResult } from "./search/index.js";
 export type {
   DirectConversationListResponse,

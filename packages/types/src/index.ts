@@ -5,6 +5,10 @@ export type {
   ApiErrorResponse,
   ApiHealthResponse,
   ChatAttachmentResponse,
+  MessageReactionEmoji,
+  MessageReactionResponse,
+  MessageReactionToggleResponse,
+  MessageReactionUserResponse,
   ChannelCreateResponse,
   ChannelJoinResponse,
   ChannelListResponse,
@@ -41,3 +45,4 @@ export type {
   NotificationResponse,
   NotificationType
 } from "./api/index.js";
+export { MESSAGE_REACTION_EMOJI } from "./api/index.js";

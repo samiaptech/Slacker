@@ -60,7 +60,8 @@ const channelMessage: ChannelMessageWithSender = Object.freeze({
   type: "message",
   text: "Hello, channel!",
   createdAt: new Date("2026-10-15T12:00:00.000Z"),
-  sender: Object.freeze({ id: memberIdentity.id, name: memberIdentity.name, image: null })
+  sender: Object.freeze({ id: memberIdentity.id, name: memberIdentity.name, image: null }),
+  reactions: Object.freeze([])
 });
 const departureEntry = Object.freeze({
   id: "departure-1",
@@ -86,7 +87,8 @@ const startApi = async (
     list: () => Promise.resolve({ kind: "channel-unavailable" }),
     send: () => Promise.resolve({ kind: "channel-unavailable" }),
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
-    delete: () => Promise.resolve({ kind: "not-found" })
+    delete: () => Promise.resolve({ kind: "not-found" }),
+    toggleReaction: () => Promise.resolve({ kind: "not-found" })
   },
   attachmentStorage?: ChatAttachmentIntegration,
   updateChannel?: ChannelService["update"]
@@ -166,7 +168,8 @@ const startApi = async (
             }),
             send: () => Promise.resolve({ kind: "channel-unavailable" }),
             getAttachment: () => Promise.resolve({ kind: "not-found" }),
-            delete: () => Promise.resolve({ kind: "not-found" })
+            delete: () => Promise.resolve({ kind: "not-found" }),
+            toggleReaction: () => Promise.resolve({ kind: "not-found" })
           };
           const { server, url } = await startApi(createTestChannel, undefined, undefined, undefined, undefined,
             undefined, undefined, undefined, undefined, messageService);
@@ -642,7 +645,8 @@ void test("lists and sends channel messages with current workspace authorization
       );
     },
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
-    delete: () => Promise.resolve({ kind: "not-found" })
+    delete: () => Promise.resolve({ kind: "not-found" }),
+    toggleReaction: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -699,7 +703,8 @@ void test("lists and sends channel messages with current workspace authorization
           ? { kind: "found" as const, attachment }
           : { kind: "not-found" as const }
       ),
-      delete: () => Promise.resolve({ kind: "not-found" })
+      delete: () => Promise.resolve({ kind: "not-found" }),
+      toggleReaction: () => Promise.resolve({ kind: "not-found" })
     };
     const attachmentStorage: ChatAttachmentIntegration = {
       upload: () => Promise.resolve(attachment),
@@ -770,7 +775,8 @@ void test("lists and sends channel messages with current workspace authorization
       type: "message",
       text: "Hello, channel!",
       createdAt: channelMessage.createdAt.toISOString(),
-      sender: { id: memberIdentity.id, name: memberIdentity.name, image: null }
+      sender: { id: memberIdentity.id, name: memberIdentity.name, image: null },
+      reactions: []
     }],
     nextCursor: null
   });
@@ -814,7 +820,8 @@ void test("exposes the message deletion contract and derives admin override from
         return Promise.resolve({ kind: "attachment-cleanup-failed" });
       }
       return Promise.resolve(args[5] ? { kind: "deleted" } : { kind: "forbidden" });
-    }
+    },
+    toggleReaction: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -863,4 +870,67 @@ void test("exposes the message deletion contract and derives admin override from
   });
   assert.equal(cleanupFailure.status, 503);
   assert.equal((await cleanupFailure.json() as { error: { code: string } }).error.code, "message_delete_cleanup_failed");
+});
+
+void test("toggles channel reactions with authenticated identity and rejects unsupported emoji", async (context) => {
+  const calls: unknown[][] = [];
+  const reactions = [{
+    emoji: "👍" as const,
+    count: 2,
+    users: [{ id: memberIdentity.id, name: memberIdentity.name, image: null }],
+    usersTruncated: true,
+    reactedByMe: true
+  }];
+  const messageService: ChannelMessageService = {
+    list: () => Promise.resolve({ kind: "channel-unavailable" }),
+    send: () => Promise.resolve({ kind: "channel-unavailable" }),
+    getAttachment: () => Promise.resolve({ kind: "not-found" }),
+    delete: () => Promise.resolve({ kind: "not-found" }),
+    toggleReaction: (...args) => {
+      calls.push(args);
+      return Promise.resolve({ kind: "updated", messageId: "message-1", reactions });
+    }
+  };
+  const { server, url } = await startApi(
+    createTestChannel,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    messageService
+  );
+  context.after(async () => server.stop());
+  const endpoint = `${url}/channel-1/messages/message-1/reactions`;
+  const request = (identity: string, emoji: string) => fetch(endpoint, {
+    method: "POST",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": identity
+    },
+    body: JSON.stringify({ emoji })
+  });
+
+  const response = await request("member", "👍");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { messageId: "message-1", reactions });
+  assert.deepEqual(calls, [["workspace-configured", "channel-1", memberIdentity.id, "message-1", "👍"]]);
+
+  const unsupported = await request("member", "🧨");
+  assert.equal(unsupported.status, 400);
+  assert.deepEqual(await unsupported.json(), {
+    error: {
+      code: "validation_error",
+      message: "Request validation failed.",
+      details: { field: "emoji", reason: "unsupported_emoji" }
+    }
+  });
+  const outsideWorkspace = await request("outside", "👍");
+  assert.equal(outsideWorkspace.status, 403);
+  assert.equal(calls.length, 1);
 });

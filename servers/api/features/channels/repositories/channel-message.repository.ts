@@ -7,6 +7,8 @@ import {
 } from "../domain/index.js";
 import type { ChannelMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
+import type { StoredMessageReaction } from "../../message-reactions/index.js";
+import type { MessageReactionEmoji } from "@workspace/types";
 
 export type ChannelMessageStorageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageDocument[] }>
@@ -39,6 +41,20 @@ export type ChannelMessageStorage = Readonly<{
     scope: ChannelMessageDeleteScope,
     isWorkspaceAdmin: boolean
   ) => Promise<MessageDeleteResult>;
+  listReactionsForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageIds: readonly string[]
+  ) => Promise<readonly StoredMessageReaction[]>;
+  toggleReactionForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    emoji: MessageReactionEmoji,
+    now: Date
+  ) => Promise<Readonly<{ kind: "updated"; reactions: readonly StoredMessageReaction[] }> | Readonly<{ kind: "not-found" }>>;
   findAttachmentForMember?: (
     workspaceId: string,
     channelId: string,
@@ -63,6 +79,8 @@ export type ChannelMessageRepository = Readonly<{
     message: ChannelMessage
   ) => Promise<"created" | "channel-unavailable">;
   deleteForMember: ChannelMessageStorage["deleteForMember"];
+  listReactionsForMember?: ChannelMessageStorage["listReactionsForMember"];
+  toggleReactionForMember?: ChannelMessageStorage["toggleReactionForMember"];
   findAttachmentForMember?: ChannelMessageStorage["findAttachmentForMember"];
 }>;
 
@@ -124,6 +142,12 @@ export const createChannelMessageRepository = (storage: ChannelMessageStorage): 
   createForMember: (workspaceId, channelId, userId, message) =>
     storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message)),
   deleteForMember: storage.deleteForMember,
+  ...(storage.listReactionsForMember
+    ? { listReactionsForMember: storage.listReactionsForMember }
+    : {}),
+  ...(storage.toggleReactionForMember
+    ? { toggleReactionForMember: storage.toggleReactionForMember }
+    : {}),
   ...(storage.findAttachmentForMember
     ? { findAttachmentForMember: storage.findAttachmentForMember }
     : {})

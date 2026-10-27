@@ -1,5 +1,9 @@
 import type { RequestHandler } from "express";
-import type { ChannelMessageResponse } from "@workspace/types";
+import {
+  MESSAGE_REACTION_EMOJI,
+  type ChannelMessageResponse,
+  type MessageReactionToggleResponse
+} from "@workspace/types";
 import { z } from "zod";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
 import { createApplicationError } from "../../../errors/index.js";
@@ -23,7 +27,7 @@ import { resolveChannelMemberAccess, sendChannelAccessError, type ChannelAccessD
 type ChannelMessageControllerDependencies = ChannelAccessDependencies & Readonly<{
   service: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
-  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageDeleted">;
+  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageDeleted" | "publishMessageReactions">;
   notifications?: Pick<NotificationService, "notifyChannelMessage" | "markResourceRead">;
 }>;
 
@@ -37,6 +41,7 @@ const messageBodySchema = z.object({
     .refine((text) => Array.from(text).length <= CHANNEL_MESSAGE_MAX_LENGTH)
 }).strict();
 const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
+const reactionBodySchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJI) }).strict();
 
 type SystemEntryResponse = Readonly<{
   id: string;
@@ -70,6 +75,7 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
     type: "message",
     text: message.text,
     createdAt: message.createdAt.toISOString(),
+    reactions: message.reactions,
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -79,6 +85,57 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
     })) } : {}),
     sender: message.sender
   };
+};
+
+export const createToggleChannelMessageReactionController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ChannelMessageControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendChannelAccessError(access, next);
+      return;
+    }
+    const { channelId, messageId } = request.params;
+    if (typeof channelId !== "string" || typeof messageId !== "string" || !channelId || !messageId) {
+      next(channelUnavailableError());
+      return;
+    }
+    const parsed = reactionBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "emoji", reason: "unsupported_emoji" }
+      }));
+      return;
+    }
+    const result = await service.toggleReaction(
+      access.access.workspace.id,
+      channelId,
+      access.access.user.id,
+      messageId,
+      parsed.data.emoji
+    );
+    if (result.kind === "unavailable") {
+      next(messageStorageError());
+      return;
+    }
+    if (result.kind === "not-found") {
+      next(channelUnavailableError());
+      return;
+    }
+    const body: MessageReactionToggleResponse = {
+      messageId: result.messageId,
+      reactions: result.reactions
+    };
+    realtime?.publishMessageReactions(access.access.workspace.id, channelId, body);
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
 };
 
 const channelUnavailableError = () => createApplicationError({
