@@ -293,6 +293,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       text,
       createdAt: new Date().toISOString(),
       attachments: [],
+      reactions: [],
       sender: { id: currentUser.id, name: currentUser.name, image: currentUser.image },
       deliveryState: "sending",
       pendingFiles: files

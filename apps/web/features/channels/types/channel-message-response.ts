@@ -6,6 +6,7 @@ import type {
   ChannelSystemEventResponse,
   ChatAttachmentResponse
 } from "@workspace/types";
+import { messageReactionSchema } from "@/features/conversation-history/public";
 
 const attachmentSchema = z.object({
   id: z.string().min(1),
@@ -23,6 +24,7 @@ const channelMessageBaseSchema = z.object({
   text: z.string().refine((text) => Array.from(text).length <= 4_000),
   createdAt: z.iso.datetime(),
   attachments: z.array(attachmentSchema).max(5).readonly().optional(),
+  reactions: z.array(messageReactionSchema).readonly().optional(),
   sender: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -31,7 +33,7 @@ const channelMessageBaseSchema = z.object({
 }).strict();
 
 const channelMessageSchema = channelMessageBaseSchema.transform((message): ChannelMessageResponse => {
-  return { ...message, type: "message", attachments: message.attachments ?? [] };
+  return { ...message, type: "message", attachments: message.attachments ?? [], reactions: message.reactions ?? [] };
 }) satisfies z.ZodType<ChannelMessageResponse>;
 
 const channelSystemEventSchema = z.object({

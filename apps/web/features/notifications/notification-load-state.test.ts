@@ -5,7 +5,6 @@ import type { NotificationView } from "./types/notification-response";
 
 const socketNotification: NotificationView = {
   id: "notification-2",
-  recipientId: "user-1",
   eventId: "message-2",
   type: "mention",
   workspaceId: "workspace-1",
@@ -15,10 +14,16 @@ const socketNotification: NotificationView = {
   readAt: "2026-10-26T09:01:00.000Z"
 };
 
+type NotificationState = Readonly<{
+  notifications: readonly NotificationView[];
+  unreadCount: number;
+  nextCursor: string | null;
+}>;
+
 void test("late loads preserve socket-added and locally read notification state", () => {
-  const current = { notifications: [socketNotification], unreadCount: 0, nextCursor: null };
-  const stale = { notifications: [], unreadCount: 1, nextCursor: "older-page" };
-  let state = current;
+  const current: NotificationState = { notifications: [socketNotification], unreadCount: 0, nextCursor: null };
+  const stale: NotificationState = { notifications: [], unreadCount: 1, nextCursor: "older-page" };
+  let state: NotificationState = current;
 
   if (shouldApplyNotificationLoad(1, 1, 4, 6)) state = stale;
 

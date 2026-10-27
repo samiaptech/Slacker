@@ -16,3 +16,4 @@ export type { MessageDeliveryState, MessageWithDelivery } from "../pending-messa
 export { MessageDeliveryIndicator } from "../message-delivery-indicator";
 export { MessageAttachmentList } from "../message-attachment-list";
 export type { MessageAttachment } from "../message-attachment-list";
+export { messageReactionSchema } from "../message-reaction-schema";

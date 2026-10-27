@@ -392,6 +392,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       createdAt: new Date().toISOString(),
       type: "message",
       attachments: [],
+      reactions: [],
       sender: { id: currentUser.id, name: currentUser.name, image: currentUser.image },
       deliveryState: "sending",
       pendingFiles: files

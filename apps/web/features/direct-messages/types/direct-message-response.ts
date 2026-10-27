@@ -6,6 +6,7 @@ import type {
   DirectMessageListResponse,
   DirectMessageResponse
 } from "@workspace/types";
+import { messageReactionSchema } from "@/features/conversation-history/public";
 
 const attachmentSchema = z.object({
   id: z.string().min(1),
@@ -34,6 +35,7 @@ const directMessageBaseSchema = z.object({
   text: z.string().refine((text) => Array.from(text).length <= 4_000),
   createdAt: z.iso.datetime(),
   attachments: z.array(attachmentSchema).max(5).readonly().optional(),
+  reactions: z.array(messageReactionSchema).readonly().optional(),
   sender: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -42,7 +44,7 @@ const directMessageBaseSchema = z.object({
 }).strict();
 
 const directMessageSchema = directMessageBaseSchema.transform((message): DirectMessageResponse => {
-  return { ...message, attachments: message.attachments ?? [] };
+  return { ...message, attachments: message.attachments ?? [], reactions: message.reactions ?? [] };
 }) satisfies z.ZodType<DirectMessageResponse>;
 
 export const directConversationResponseSchema = z.object({
