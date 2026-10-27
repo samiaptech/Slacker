@@ -16,7 +16,7 @@ export const createWebContentSecurityPolicy = ({
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${production ? "" : " 'unsafe-eval'"}`,
     `style-src 'self' 'nonce-${nonce}'`,
-    `style-src-elem 'self' 'nonce-${nonce}'`,
+    `style-src-elem 'self'${production ? ` 'nonce-${nonce}'` : " 'unsafe-inline'"}`,
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: blob: https://*.googleusercontent.com",
     "font-src 'self' data:",

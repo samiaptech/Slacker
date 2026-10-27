@@ -2,7 +2,8 @@
 
 import { useState, type ReactElement } from "react";
 import { Bell, LoaderCircle } from "lucide-react";
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@workspace/ui";
+import { Button } from "@workspace/ui";
+import { Popover, PopoverContent, PopoverTrigger } from "@workspace/ui/primitives";
 import type { NotificationType, WorkspaceMembershipSummary } from "@workspace/types";
 import type { NotificationView } from "./types/notification-response";
 import type { ChannelListResponseView } from "@/features/channels/public";
@@ -97,35 +98,36 @@ export const NotificationCenter = ({
   };
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <Button
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
-        className="relative size-9 shrink-0"
-        onClick={() => setOpen(true)}
-        size="icon"
-        type="button"
-        variant="ghost"
-      >
-        <Bell aria-hidden="true" className="size-4" />
-        {unreadCount > 0 ? (
-          <span aria-hidden="true" className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-[#b84638] px-1 text-[10px] font-semibold leading-none text-white">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        ) : null}
-      </Button>
-      <DialogContent className="flex max-h-[min(80vh,42rem)] flex-col gap-3 overflow-hidden p-0 sm:max-w-xl">
-        <DialogHeader className="border-b border-border px-5 pb-4 pt-5 pr-12">
-          <DialogTitle>Notifications</DialogTitle>
-          <DialogDescription>
+    <Popover onOpenChange={setOpen} open={open}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          className="relative size-9 shrink-0"
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Bell aria-hidden="true" className="size-4" />
+          {unreadCount > 0 ? (
+            <span aria-hidden="true" className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-[#b84638] px-1 text-[10px] font-semibold leading-none text-white">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-labelledby="notifications-title" className="flex max-h-[min(58dvh,28rem)] w-[min(20rem,calc(100vw-1rem))] flex-col gap-2 overflow-hidden p-0 shadow-xl" side="bottom" sideOffset={8}>
+        <div className="border-b border-border px-4 py-3 pr-10">
+          <h2 className="text-sm font-semibold leading-none" id="notifications-title">Notifications</h2>
+          <p className="mt-1.5 text-xs text-muted-foreground">
             {unreadCount === 0 ? "You’re all caught up." : `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`}
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
         {error || navigationError ? (
           <p className="mx-5 text-sm text-destructive" role="alert">{navigationError ?? error}</p>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3" aria-live="polite">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" aria-live="polite">
           {isLoading && notifications.length === 0 ? (
             <p className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground" role="status">
               <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />Loading notifications…
@@ -141,7 +143,7 @@ export const NotificationCenter = ({
                   <li key={notification.id}>
                     <button
                       aria-label={`${notification.actor.name} ${notificationDescription(notification, resourceLabel)}, ${notification.readAt ? "read" : "unread"}`}
-                      className={`flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${notification.readAt ? "" : "bg-[#edf5ef]"}`}
+                      className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${notification.readAt ? "" : "bg-[#edf5ef]"}`}
                       onClick={() => void openNotification(notification)}
                       type="button"
                     >
@@ -176,7 +178,7 @@ export const NotificationCenter = ({
             <Button className="mt-2 w-full" onClick={onRefresh} type="button" variant="outline">Retry</Button>
           ) : null}
         </div>
-      </DialogContent>
-    </Dialog>
+      </PopoverContent>
+    </Popover>
   );
 };

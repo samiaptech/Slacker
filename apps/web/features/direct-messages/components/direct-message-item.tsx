@@ -1,10 +1,12 @@
 import { memo, type ReactElement } from "react";
 import Image from "next/image";
 import { FileText } from "lucide-react";
+import type { MessageReactionEmoji } from "@workspace/types";
 import {
   MessageActions,
   MessageAttachmentList,
   MessageDeliveryIndicator,
+  MessageReactions,
   type MessageAttachment,
   type MessageDeliveryState,
   type MessageDeleteScope
@@ -24,9 +26,13 @@ type DirectMessageItemProps = Readonly<{
   downloadingAttachmentId: string | null;
   canDeleteForEveryone: boolean;
   isDeleting: boolean;
+  isReactionPending: boolean;
+  currentUserId: string;
+  currentUserName: string;
   onDownloadAttachment: (attachment: DirectMessageAttachment) => void;
   loadImagePreview: (attachment: MessageAttachment, signal: AbortSignal) => Promise<string>;
   onDelete: (scope: MessageDeleteScope) => void;
+  onToggleReaction: (emoji: MessageReactionEmoji) => void;
 }>;
 
 const formatMessageTime = (value: string): string =>
@@ -55,7 +61,11 @@ const DirectMessageItemView = ({
   loadImagePreview,
   canDeleteForEveryone,
   isDeleting,
-  onDelete
+  isReactionPending,
+  currentUserId,
+  currentUserName,
+  onDelete,
+  onToggleReaction
 }: DirectMessageItemProps): ReactElement => (
   <>
     {startsNewDay ? (
@@ -78,7 +88,12 @@ const DirectMessageItemView = ({
           <MessageDeliveryIndicator onRetry={onRetry} retryDisabled={retryDisabled} state={deliveryState} />
           {!deliveryState ? <MessageActions canDeleteForEveryone={canDeleteForEveryone} disabled={isDeleting} onDelete={onDelete} /> : null}
         </div>
-        {message.text ? <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p> : null}
+        {message.text ? (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="w-fit max-w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
+            {!deliveryState ? <MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /> : null}
+          </div>
+        ) : !deliveryState ? <div className="mt-1"><MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /></div> : null}
         {pendingFiles.length > 0 ? (
           <ul aria-label="Pending attachments" className="mt-3 flex flex-wrap gap-2">
             {pendingFiles.map((file, index) => (

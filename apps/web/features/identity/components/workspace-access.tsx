@@ -12,6 +12,7 @@ import type {
   WorkspaceMembershipSummary,
   WorkspaceMutationResponse
 } from "@workspace/types";
+import { application } from "@/constants/application";
 import { WorkspaceContextProvider } from "@/features/workspace-foundation/public";
 import { createAuthenticationClient } from "./auth-client";
 import { workspaceAccessSchema } from "../types";
@@ -45,10 +46,10 @@ const WorkspaceLoadingSkeleton = (): ReactElement => (
     <div aria-hidden="true" className="workspace-layout-rail workspace-loading-rail">
       <span className="flex size-10 items-center justify-center rounded-xl bg-[#b8e3d1] font-bold text-[#173b3a]">N</span>
     </div>
-    <aside aria-hidden="true" className="workspace-layout-sidebar is-mobile-open workspace-loading-sidebar hidden min-[420px]:flex">
+    <aside aria-hidden="true" className="workspace-layout-sidebar is-mobile-open workspace-loading-sidebar hidden min-[760px]:flex">
       <div className="workspace-sidebar-brand">
         <div>
-          <p className="font-semibold text-white">Nutshyll</p>
+          <p className="font-semibold text-white">{application.name}</p>
           <p className="mt-1 text-xs text-white/55">Your team workspace</p>
         </div>
       </div>

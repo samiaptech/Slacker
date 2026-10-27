@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
-import { FileText, Paperclip, Pin, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
+import { FileText, Paperclip, Pin, Send, X } from "lucide-react";
+import type { MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
 import {
   channelMessageListResponseSchema,
@@ -11,6 +12,7 @@ import {
 } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
+import { useChannelMessageRefresh } from "./channel-message-refresh-context";
 import { requestChannelMessages } from "./channel-message-request";
 import { ChannelMessageItem } from "./channel-message-item";
 import { ChannelSystemMessageItem } from "./channel-system-message-item";
@@ -22,7 +24,9 @@ import {
   type HistoryScrollAnchor,
   type MessageAttachment,
   type MessageDeleteScope,
-  type MessageWithDelivery
+  type MessageWithDelivery,
+  optimisticallyToggleMessageReaction,
+  requestMessageReaction
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -90,6 +94,8 @@ const formatFileSize = (size: number): string => size < 1024 * 1024
 export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDescription, canSend }: ChannelMessagesProps): ReactElement => {
   const { activeWorkspace, currentUser } = useWorkspaceContext();
   const realtime = useChannelRealtime();
+  const { registerRefreshHandler } = useChannelMessageRefresh();
+  const realtimeSocketRef = useRef(realtime.socket);
   const [messages, setMessages] = useState<readonly ChannelTimelineMessage[]>([]);
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -100,6 +106,9 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [pendingReactionMessageIds, setPendingReactionMessageIds] = useState<ReadonlySet<string>>(new Set());
+  const reactionRequestsRef = useRef(new Set<string>());
+  const realtimeReactionUpdatesRef = useRef(new Map<string, readonly MessageReactionResponse[]>());
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -125,10 +134,16 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const typingUsersTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const isTypingRef = useRef(false);
   const shouldScrollToBottom = useRef(true);
+  useEffect(() => {
+    realtimeSocketRef.current = realtime.socket;
+  }, [realtime.socket]);
+
+  useEffect(() => registerRefreshHandler(() => setReloadToken((current) => current + 1)), [registerRefreshHandler]);
+
   const revokeAccess = useCallback((): void => {
     historyAnchorRef.current = null;
     if (isTypingRef.current) {
-      realtime.socket?.emit("channel:typing", { channelId, active: false });
+      realtimeSocketRef.current?.emit("channel:typing", { channelId, active: false });
       isTypingRef.current = false;
     }
     setAccessRevoked(true);
@@ -136,7 +151,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     setNextCursor(null);
     setDraft("");
     setSelectedFiles([]);
-  }, [channelId, realtime.socket]);
+  }, [channelId]);
 
   useEffect(() => {
     let active = true;
@@ -222,6 +237,17 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       if (change.channelId !== channelId) return;
       setMessages((current) => current.filter((message) => message.id !== change.messageId));
     };
+    const onMessageReactions = (change: Readonly<{ channelId: string } & MessageReactionToggleResponse>): void => {
+      if (change.channelId !== channelId) return;
+      if (reactionRequestsRef.current.has(change.messageId)) {
+        realtimeReactionUpdatesRef.current.set(change.messageId, change.reactions);
+      }
+      setMessages((current) => current.map((message) =>
+        message.id === change.messageId && isPendingChannelMessage(message)
+          ? { ...message, reactions: change.reactions }
+          : message
+      ));
+    };
     const onAccessRevoked = (change: Readonly<{ workspaceId: string; channelId: string }>): void => {
       if (change.workspaceId !== activeWorkspace.id || change.channelId !== channelId) return;
       revokeAccess();
@@ -252,6 +278,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     socket.on("channel:message:new", onMessage);
     socket.on("channel:system:new", onSystemMessage);
     socket.on("channel:message:deleted", onMessageDeleted);
+    socket.on("channel:message:reactions", onMessageReactions);
     socket.on("channel:access:revoked", onAccessRevoked);
     socket.on("workspace:access:revoked", onWorkspaceAccessRevoked);
     socket.on("channel:typing", onTyping);
@@ -261,6 +288,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       socket.off("channel:message:new", onMessage);
       socket.off("channel:system:new", onSystemMessage);
       socket.off("channel:message:deleted", onMessageDeleted);
+      socket.off("channel:message:reactions", onMessageReactions);
       socket.off("channel:access:revoked", onAccessRevoked);
       socket.off("workspace:access:revoked", onWorkspaceAccessRevoked);
       socket.off("channel:typing", onTyping);
@@ -476,6 +504,61 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     return URL.createObjectURL(blob);
   }, [activeWorkspace.id, apiBaseUrl]);
 
+  const toggleReaction = async (messageId: string, emoji: MessageReactionEmoji): Promise<void> => {
+    if (reactionRequestsRef.current.has(messageId)) return;
+    const message = messages.find((entry): entry is MessageWithDelivery<ChannelMessageView> =>
+      isPendingChannelMessage(entry) && entry.id === messageId
+    );
+    if (!message) return;
+    const previousReactions = message.reactions;
+    reactionRequestsRef.current.add(messageId);
+    realtimeReactionUpdatesRef.current.delete(messageId);
+    setPendingReactionMessageIds((current) => new Set(current).add(messageId));
+    setMessageActionError(null);
+    setMessages((current) => current.map((entry) =>
+      isPendingChannelMessage(entry) && entry.id === messageId
+        ? {
+          ...entry,
+          reactions: optimisticallyToggleMessageReaction(entry.reactions, emoji, {
+            id: currentUser.id,
+            name: currentUser.name || currentUser.email,
+            image: currentUser.image
+          })
+        }
+        : entry
+    ));
+    try {
+      const result = await requestMessageReaction({
+        apiBaseUrl,
+        workspaceId: activeWorkspace.id,
+        target: { type: "channel", id: channelId },
+        messageId,
+        emoji
+      });
+      setMessages((current) => current.map((message) =>
+        message.id === result.messageId && isPendingChannelMessage(message)
+          ? { ...message, reactions: result.reactions }
+          : message
+      ));
+    } catch (error: unknown) {
+      const latestServerReactions = realtimeReactionUpdatesRef.current.get(messageId) ?? previousReactions;
+      setMessages((current) => current.map((entry) =>
+        isPendingChannelMessage(entry) && entry.id === messageId
+          ? { ...entry, reactions: latestServerReactions }
+          : entry
+      ));
+      setMessageActionError(error instanceof Error ? error.message : "The reaction could not be updated.");
+    } finally {
+      reactionRequestsRef.current.delete(messageId);
+      realtimeReactionUpdatesRef.current.delete(messageId);
+      setPendingReactionMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    }
+  };
+
   const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
     if (deletingMessageId) return;
     setDeletingMessageId(messageId);
@@ -558,17 +641,6 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   return (
     <section aria-label="Channel conversation" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf8]">
       <p aria-live="polite" className="sr-only" role="status">{searchJump.announcement}</p>
-      <header className="flex shrink-0 items-center gap-3 border-b border-[#e9e7e1] px-5 py-2.5 sm:px-6">
-        <p className="ml-auto flex items-center gap-2 text-xs text-[#74817b]" role="status">
-          <span aria-hidden="true" className={`size-2 rounded-full ${realtime.workspaceReady ? "bg-emerald-500" : "bg-amber-400"}`} />
-          {realtime.workspaceReady
-            ? channelName.toLocaleLowerCase() === "general" ? "Live" : "Live updates"
-            : realtime.errorMessage ?? (realtime.status === "connected" ? "Connecting live chat…" : "Reconnecting to live chat…")}
-        </p>
-        <Button aria-label="Refresh messages" className="size-8 text-[#687a72] hover:bg-[#eef3ef]" disabled={isLoading} onClick={() => setReloadToken((current) => current + 1)} size="icon" type="button" variant="ghost">
-          <RefreshCw aria-hidden="true" className="size-4" />
-        </Button>
-      </header>
       {channelName.toLocaleLowerCase() === "general" ? (
         <div className="flex shrink-0 items-center gap-3 border-b border-[#e2e9e1] bg-[#f1f5ef] px-8 py-2">
           <Pin aria-hidden="true" className="size-4 shrink-0 text-[#507b68]" />
@@ -619,10 +691,14 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                     isDownloadBusy={downloadingAttachmentId !== null}
                     canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
                     isDeleting={deletingMessageId !== null}
+                    isReactionPending={pendingReactionMessageIds.has(message.id)}
+                    currentUserId={currentUser.id}
+                    currentUserName={currentUser.name || currentUser.email}
                     message={message}
                     onDownloadAttachment={downloadAttachment}
                     loadImagePreview={loadImagePreview}
                     onDelete={(scope) => { void deleteMessage(message.id, scope); }}
+                    onToggleReaction={(emoji) => { void toggleReaction(message.id, emoji); }}
                     startsNewDay={startsNewDay}
                   />
                 ))}
@@ -655,7 +731,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
               </ul>
             ) : null}
             <div className="flex items-end gap-2 rounded-2xl border border-input bg-background p-2 shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
-              <Button aria-label="Attach files" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={() => attachmentInputRef.current?.click()} size="icon" type="button" variant="ghost">
+              <Button aria-label="Attach files, up to 5 files and 10 MB each" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={() => attachmentInputRef.current?.click()} size="icon" title="Up to 5 files · 10 MB each" type="button" variant="ghost">
                 <Paperclip aria-hidden="true" className="size-4" />
               </Button>
               <Textarea
@@ -679,13 +755,12 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                 <Send aria-hidden="true" className="size-4" />
               </Button>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex min-w-0 items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
               {sendError || attachmentError || attachmentActionError
-                ? <p className="text-xs text-destructive" role="alert">{sendError ?? attachmentError ?? attachmentActionError}</p>
-                : <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck aria-hidden="true" className="size-3.5" />Only current channel members can read or send messages.</p>}
-              <span className="ml-auto text-xs text-muted-foreground">{Array.from(draft).length}/{4_000} · Enter to send, Shift+Enter for a new line</span>
+                ? <p className="min-w-0 truncate text-destructive" role="alert">{sendError ?? attachmentError ?? attachmentActionError}</p>
+                : <p className="min-w-0 truncate">Enter sends · Shift+Enter for a new line</p>}
+              {draft.length > 0 ? <span className="shrink-0">{Array.from(draft).length}/4,000</span> : null}
             </div>
-            <p className="px-1 text-[10px] text-muted-foreground">Up to 5 files, 10 MB each · JPG, PNG, GIF, WebP, PDF, TXT, CSV, MD</p>
           </form>
         ) : (
           <p className="text-center text-sm text-muted-foreground" role="status">

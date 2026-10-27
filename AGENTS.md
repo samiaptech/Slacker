@@ -102,8 +102,16 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-26.
+Updated: 2026-10-27.
 
+- **Suggested next chat features:** Prioritize emoji reactions first for high value and
+  contained scope, then message editing for authors with edited indicators and consistent
+  history/search/realtime updates. Add per-member channel notification controls with clear
+  All / Mentions only / Muted behavior, then private saved messages with navigation back to
+  the source conversation. Threads/replies are the broadest change; plan them separately
+  across persistence, history, notifications, unread state, realtime, and mobile UX, with an
+  explicit decision on one-level threading and whether replies also appear in the main
+  channel. Reorder if threads are the primary user need.
 - **Ownership:** Codex handles frontend design and interactions; the backend agent handles
   APIs, contracts, persistence, authorization, and backend validation. Coordinate changes
   to shared contracts explicitly.
@@ -227,6 +235,43 @@ Updated: 2026-10-26.
   The design reference was compared directly;
   the local browser preview had no active workspace session, so the updated page could not be
   visually rechecked with populated data.
+- **Live navigation/composer follow-up:** In the signed-in live browser, first channel
+  navigation took about 15.2 seconds and a later channel navigation about 3.4 seconds;
+  these are single observations, not a P95. The guaranteed frontend remount was identified:
+  `/` was in `(public)` while workspace routes were in `(app)`, so clicking into a channel
+  created a second `WorkspaceAccess` and `ChannelWorkspace`. The home page now lives in
+  `(app)` to retain the authenticated shell and realtime provider across navigation. Channel
+  and DM composer helper text is shorter; attachment limits remain in the attach control's
+  accessible name/title. Notifications now use a compact right-aligned popover that closes
+  on outside click. A mobile `visualViewport` hook sizes the fixed app shell above the
+  on-screen keyboard, and the sidebar switches to its overlay behavior below 760px. Web
+  typecheck, home-page test, channel schema tests, and diff checks pass. Focused ESLint
+  returned zero errors with the existing workspace-access navigation warning. Turbopack
+  build failed to spawn its CSS worker; Webpack build hit an EPERM while creating a generated
+  `.next` route directory. Vercel runtime-log access returned 403, so backend latency and
+  P95 remain unmeasured. Changes are local and undeployed. After deploy, Codex: verify fast
+  channel navigation, mobile keyboard composer anchoring, and notification dismissal in the
+  live browser; operator: provide Vercel runtime-log access if API timing isolation is needed.
+  The channel conversation's separate Live/refresh strip was removed; compact live status
+  and refresh now sit beside the notification bell in the main header. The refresh handler is
+  registered by the active conversation and hidden on the channel About view. Web TypeScript
+  check and `git diff --check` passed. Focused ESLint could not complete: pnpm could not fetch
+  its pinned release because registry DNS was unavailable, and direct ESLint execution
+  stalled and was stopped. Changes remain local and uncommitted.
+
+- **TeamNest branding:** The web application's metadata, workspace loading identity, sidebar
+  brand, home label, and profile description now use the shared `TeamNest` application name.
+  Existing `nutshyll.*` browser storage keys, database/test prefixes, Cloudinary paths, and
+  repository identity were preserved to avoid breaking saved state or stored assets. Backend
+  owner: change Better Auth's `appName` from `Nutshyll` to `TeamNest` if that value appears in
+  auth-facing UI; no backend files were edited. Web TypeScript check and `git diff --check`
+  passed. Changes are local and uncommitted.
+
+- **Workspace rail tooltips:** Workspace initial buttons now show each full workspace name
+  in the shared tooltip on hover and keyboard focus; clicking still switches workspaces.
+  Web TypeScript check passed. Focused ESLint stalled and was stopped; `git diff --check`
+  passed. Changes remain local and uncommitted.
+
 - **Performance/history:** Channel and direct-message navigation request conversation
   metadata and the first 50-message history page concurrently. Returning workspace
   sessions load saved access alongside the workspace list. Older-history pagination in
@@ -241,7 +286,15 @@ Updated: 2026-10-26.
   the authenticated sender profile and avoid a post-save profile query; channel sends
   avoid a redundant channel read while retaining the membership check and channel revision
   write in the transaction. API fake-storage tests assert readiness checks are not repeated.
-  Channel history now shares matching in-flight reads without retaining settled responses; local browser history requests dropped from five to one, and switching to an already-loaded workspace channel took about 1.25 seconds. Notification loads discard stale responses after socket/local-read changes. Cold reload startup and production/database latency remain unmeasured.
+  Channel history reads now deduplicate matching in-flight requests by user, workspace,
+  channel, page size, API origin, and request scope; settled responses are not cached.
+  This prevents repeated effects during local development from issuing duplicate history
+  queries. A local browser run showed the history request count drop from five to one;
+  switching to another already-listed channel displayed the conversation in about 1.25s.
+  Full-reload startup still includes workspace bootstrap and remains about 4–5s locally.
+  The notification inbox no longer refetches its list and unread count on the socket's
+  initial connection; reconnects still refresh both. Web tests (27), typecheck, focused
+  lint, and build pass. No production timing or Vercel/database telemetry was available.
   Local development uses localhost;
   Google OAuth accepts localhost callbacks, not raw private LAN IP redirect hosts. Do not
   inspect `.env`.
@@ -412,7 +465,13 @@ Updated: 2026-10-26.
   returns a cached prerendered page with no script nonces, confirming it needs redeployment.
   Turbopack build could not spawn its CSS worker in this environment. The browser console's
   `content.js` eval violation is from a browser extension, separate from the app CSP.
-  Redeployment and browser verification remain pending.
+  Local dev console then showed Next's `styleTagTransform.js` and font style injection blocked
+  by nonce-only `style-src-elem`; development now allows inline style elements while
+  production remains nonce-only. CSP tests and web typecheck pass. Browser automation was
+  unavailable for local verification; restart/reload the web dev server and confirm the CSP
+  style errors are gone. The reported localhost Socket.IO handshake close and channel API
+  404s are separate from the CSP change; verify the API is running and that the selected
+  channel ID exists in the local workspace.
 
 - **Socket session lifecycle:** Socket.IO authenticates Better Auth sessions at handshake
   and now revalidates every 30 seconds; invalid sessions, user changes, or authentication
@@ -449,3 +508,28 @@ Updated: 2026-10-26.
   deployment, an authorized operator must run the aggregate initializer against the
   intended database. The feature and dependency-remediation changes were committed as
   `dca6d28` and pushed to `origin/main`; no deployment was performed.
+
+- **Persistent emoji reactions:** `.agent/backend.md` and `servers/api/README.md` document
+  channel/DM reaction endpoints, authorization, stored counts/user identities, realtime
+  events, and initializer behavior. Channel history reaction loading now performs its
+  member-authorization reads sequentially inside the Mongo transaction; concurrent session
+  reads were causing history requests to fail with MongoDB code 117 / HTTP 500. Reaction
+  toggle reads are sequential as well. Per user, selecting a different emoji now replaces
+  their prior active reaction; selecting the same emoji turns it off. A partial unique index
+  enforces one active reaction per message/member/scope, and both initializers normalize any
+  older duplicates by keeping the latest `updatedAt`. The cross-feature API is exposed through
+  `message-reactions/public/index.ts`. The API suite passed (163 passed, 2 optional MongoDB
+  tests skipped); API typecheck, architecture check, focused ESLint, secret scan, and
+  `git diff --check` passed. Commit `a61f3c3` added web reaction parsers/defaults and corrected
+  notification test typing after the shared contract made `reactions` required. Vercel then
+  revealed that `@workspace/types` runtime JavaScript is unavailable on a clean checkout:
+  the package exports `dist/index.js`, but the web build previously built only `@workspace/ui`.
+  The web build now compiles `@workspace/types` first. Production build passes after moving
+  `packages/types/dist` aside, confirming it no longer depends on stale local artifacts.
+  Web typecheck, focused ESLint, and notification regression test pass. The full web test
+  command still has four files failing locally with Node `ERR_PACKAGE_PATH_NOT_EXPORTED`; 13
+  tests pass. Frontend handoff and working-tree changes are being included in the requested
+  commit batch. Live MongoDB/browser verification remains pending. Operator: run
+  `pnpm run initialize` against the intended database before deployment, then restart the
+  API and verify channel history, websocket updates, emoji replacement, and same-emoji
+  removal.

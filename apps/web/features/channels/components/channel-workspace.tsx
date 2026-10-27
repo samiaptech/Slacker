@@ -6,7 +6,8 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
 import type { NotificationResponse } from "@workspace/types";
-import { Activity, ChevronDown, Hash, LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, UserRound, Users } from "lucide-react";
+import { application } from "@/constants/application";
+import { Activity, ChevronDown, Hash, LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, UserRound, Users } from "lucide-react";
 import {
   Button,
   Dialog,
@@ -21,12 +22,18 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
 } from "@workspace/ui/primitives";
 import { ChannelCreateDialog } from "./create-channel-dialog";
 import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelProfileToggleProvider, useChannelProfileToggle } from "./channel-profile-toggle-context";
+import { ChannelMessageRefreshProvider, useChannelMessageRefresh } from "./channel-message-refresh-context";
+import { useAppVisualViewport } from "./use-app-visual-viewport";
 import { NotificationCenter, useNotifications } from "@/features/notifications/public";
 import { directConversationListResponseSchema, directConversationResponseSchema } from "@/features/direct-messages/public";
 import type { DirectConversationView } from "@/features/direct-messages/public";
@@ -47,9 +54,11 @@ type ChannelWorkspaceProps = Readonly<{
 type ChannelListScope = "joined" | "discoverable";
 
 const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps): ReactElement => {
+  useAppVisualViewport();
   const { activeWorkspace, currentUser, selectWorkspace, signOut, startCreatingWorkspace, workspaces } = useWorkspaceContext();
   const profileToggle = useChannelProfileToggle();
   const realtime = useChannelRealtime();
+  const { refreshMessages } = useChannelMessageRefresh();
   const notificationInbox = useNotifications(apiBaseUrl, realtime.socket);
   const pathname = usePathname();
   const router = useRouter();
@@ -385,23 +394,28 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
         <button aria-label="Close navigation" className="workspace-layout-backdrop" onClick={() => setIsMobileSidebarOpen(false)} type="button" />
       ) : null}
       <aside aria-label="Workspace rail" className="workspace-layout-rail">
-        <Link aria-label="Nutshyll home" className="workspace-rail-logo" href="/">
+        <Link aria-label={`${application.name} home`} className="workspace-rail-logo" href="/">
           <span aria-hidden="true">n.</span>
         </Link>
-        <div aria-label="Workspaces" className="workspace-rail-switcher">
-          {workspaces.map((workspace) => (
-            <Button
-              aria-current={workspace.id === activeWorkspace.id ? "true" : undefined}
-              aria-label={`Switch to ${workspace.name}`}
-              className={workspace.id === activeWorkspace.id ? "workspace-rail-workspace is-active" : "workspace-rail-workspace"}
-              key={workspace.id}
-              onClick={() => selectWorkspace(workspace.id)}
-              type="button"
-              variant="ghost"
-            >
-              {workspace.name.trim().slice(0, 1).toUpperCase()}
-            </Button>
-          ))}
+        <TooltipProvider delayDuration={300}>
+          <div aria-label="Workspaces" className="workspace-rail-switcher">
+            {workspaces.map((workspace) => (
+              <Tooltip key={workspace.id}>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-current={workspace.id === activeWorkspace.id ? "true" : undefined}
+                    aria-label={`Switch to ${workspace.name}`}
+                    className={workspace.id === activeWorkspace.id ? "workspace-rail-workspace is-active" : "workspace-rail-workspace"}
+                    onClick={() => selectWorkspace(workspace.id)}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {workspace.name.trim().slice(0, 1).toUpperCase()}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>{workspace.name}</TooltipContent>
+              </Tooltip>
+            ))}
           <Button aria-label="Create workspace" className="workspace-rail-add" onClick={startCreatingWorkspace} size="icon" type="button" variant="ghost">
             <Plus aria-hidden="true" className="size-5" />
           </Button>
@@ -410,7 +424,8 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
               <PanelLeftOpen aria-hidden="true" className="size-4" />
             </Button>
           ) : null}
-        </div>
+          </div>
+        </TooltipProvider>
         <Link aria-label="Open your profile" className="workspace-rail-profile" href="/profile">
           {(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}
         </Link>
@@ -422,7 +437,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
       >
         <div className="workspace-sidebar-brand">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold tracking-tight" id="workspace-title">Nutshyll</h1>
+            <h1 className="truncate text-lg font-semibold tracking-tight" id="workspace-title">{application.name}</h1>
             <p className="mt-0.5 truncate text-xs text-white/55">A little closer, together.</p>
           </div>
           <DropdownMenu>
@@ -779,6 +794,19 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </h2>
             <p className="workspace-main-header-subtitle">{activeChannel?.description || (activeChannel ? activeChannel.name.toLocaleLowerCase() === "general" ? "The everyday, the big ideas, and everything in between." : `${activeChannel.visibility === "public" ? "Public" : "Private"} channel · Team conversation` : activeConversation ? "Direct message" : "Your team space")}</p>
           </div>
+          {activeChannel ? (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span aria-label={realtime.workspaceReady ? "Live updates connected" : "Connecting to live updates"} className="flex items-center gap-1.5 text-[11px] text-[#74817b]" role="status" title={realtime.errorMessage ?? (realtime.workspaceReady ? "Live updates connected" : "Connecting to live updates")}>
+                <span aria-hidden="true" className={`size-2 rounded-full ${realtime.workspaceReady ? "bg-emerald-500" : "bg-amber-400"}`} />
+                <span className="hidden sm:inline">{realtime.workspaceReady ? "Live" : "Connecting"}</span>
+              </span>
+              {!pathname.endsWith("/about") ? (
+                <Button aria-label="Refresh messages" className="size-8 text-[#687a72] hover:bg-[#eef3ef]" onClick={refreshMessages} size="icon" type="button" variant="ghost">
+                  <RefreshCw aria-hidden="true" className="size-4" />
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <NotificationCenter
             activeWorkspaceId={activeWorkspace.id}
             channels={channelList}
@@ -845,9 +873,11 @@ export const ChannelWorkspace = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const { activeWorkspace } = useWorkspaceContext();
   return (
     <ChannelProfileToggleProvider>
-      <ChannelRealtimeProvider apiBaseUrl={apiBaseUrl} workspaceId={activeWorkspace.id}>
-        <ChannelWorkspaceContent apiBaseUrl={apiBaseUrl}>{children}</ChannelWorkspaceContent>
-      </ChannelRealtimeProvider>
+      <ChannelMessageRefreshProvider>
+        <ChannelRealtimeProvider apiBaseUrl={apiBaseUrl} workspaceId={activeWorkspace.id}>
+          <ChannelWorkspaceContent apiBaseUrl={apiBaseUrl}>{children}</ChannelWorkspaceContent>
+        </ChannelRealtimeProvider>
+      </ChannelMessageRefreshProvider>
     </ChannelProfileToggleProvider>
   );
 };

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   getMessageDeleteFailure,
   getRestoredHistoryScrollTop,
+  toggleMessageReaction,
   type HistoryScrollAnchor
 } from "../features/conversation-history";
 
@@ -30,4 +31,10 @@ void test("reports attachment cleanup failure without treating the committed mes
     deletionCommitted: true,
     message: "The message was deleted, but an attached file could not be cleaned up."
   });
+});
+
+void test("keeps one local reaction per member and toggles it off when selected again", () => {
+  assert.deepEqual(toggleMessageReaction([], "👍"), ["👍"]);
+  assert.deepEqual(toggleMessageReaction(["👍"], "❤️"), ["❤️"]);
+  assert.deepEqual(toggleMessageReaction(["❤️"], "❤️"), []);
 });

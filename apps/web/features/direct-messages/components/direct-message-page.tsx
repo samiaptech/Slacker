@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
-import { FileText, Paperclip, Send, ShieldCheck, X } from "lucide-react";
+import { FileText, Paperclip, Send, X } from "lucide-react";
+import type { MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "@/features/channels/public";
@@ -23,7 +24,9 @@ import {
   type HistoryScrollAnchor,
   type MessageAttachment,
   type MessageDeleteScope,
-  type MessageWithDelivery
+  type MessageWithDelivery,
+  optimisticallyToggleMessageReaction,
+  requestMessageReaction
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -73,6 +76,9 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
   const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [pendingReactionMessageIds, setPendingReactionMessageIds] = useState<ReadonlySet<string>>(new Set());
+  const reactionRequestsRef = useRef(new Set<string>());
+  const realtimeReactionUpdatesRef = useRef(new Map<string, readonly MessageReactionResponse[]>());
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -175,6 +181,15 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       if (change.conversationId !== conversationId) return;
       setMessages((current) => current.filter((message) => message.id !== change.messageId));
     };
+    const onMessageReactions = (change: Readonly<{ conversationId: string } & MessageReactionToggleResponse>): void => {
+      if (change.conversationId !== conversationId) return;
+      if (reactionRequestsRef.current.has(change.messageId)) {
+        realtimeReactionUpdatesRef.current.set(change.messageId, change.reactions);
+      }
+      setMessages((current) => current.map((message) =>
+        message.id === change.messageId ? { ...message, reactions: change.reactions } : message
+      ));
+    };
     const onTyping = (payload: Readonly<{ conversationId: string; userId: string; active: boolean }>): void => {
       if (payload.conversationId !== conversationId || payload.userId === currentUser.id) return;
       if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
@@ -196,6 +211,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     socket.on("direct-message:ready", onReady);
     socket.on("direct-message:new", onMessage);
     socket.on("direct-message:deleted", onMessageDeleted);
+    socket.on("direct-message:reactions", onMessageReactions);
     socket.on("direct-message:typing", onTyping);
     socket.on("workspace:access:revoked", onWorkspaceAccessRevoked);
     if (socket.connected && realtime.workspaceReady) subscribe();
@@ -203,6 +219,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       socket.off("direct-message:ready", onReady);
       socket.off("direct-message:new", onMessage);
       socket.off("direct-message:deleted", onMessageDeleted);
+      socket.off("direct-message:reactions", onMessageReactions);
       socket.off("direct-message:typing", onTyping);
       socket.off("workspace:access:revoked", onWorkspaceAccessRevoked);
       if (socket.connected && realtime.workspaceReady) socket.emit("direct-message:unsubscribe", conversationId);
@@ -377,6 +394,55 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     return URL.createObjectURL(blob);
   }, [activeWorkspace.id, apiBaseUrl]);
 
+  const toggleReaction = async (messageId: string, emoji: MessageReactionEmoji): Promise<void> => {
+    if (reactionRequestsRef.current.has(messageId)) return;
+    const message = messages.find((entry) => entry.id === messageId);
+    if (!message) return;
+    const previousReactions = message.reactions;
+    reactionRequestsRef.current.add(messageId);
+    realtimeReactionUpdatesRef.current.delete(messageId);
+    setPendingReactionMessageIds((current) => new Set(current).add(messageId));
+    setMessageActionError(null);
+    setMessages((current) => current.map((entry) =>
+      entry.id === messageId
+        ? {
+          ...entry,
+          reactions: optimisticallyToggleMessageReaction(entry.reactions, emoji, {
+            id: currentUser.id,
+            name: currentUser.name || currentUser.email,
+            image: currentUser.image
+          })
+        }
+        : entry
+    ));
+    try {
+      const result = await requestMessageReaction({
+        apiBaseUrl,
+        workspaceId: activeWorkspace.id,
+        target: { type: "direct-message", id: conversationId },
+        messageId,
+        emoji
+      });
+      setMessages((current) => current.map((message) =>
+        message.id === result.messageId ? { ...message, reactions: result.reactions } : message
+      ));
+    } catch (error: unknown) {
+      const latestServerReactions = realtimeReactionUpdatesRef.current.get(messageId) ?? previousReactions;
+      setMessages((current) => current.map((entry) =>
+        entry.id === messageId ? { ...entry, reactions: latestServerReactions } : entry
+      ));
+      setMessageActionError(error instanceof Error ? error.message : "The reaction could not be updated.");
+    } finally {
+      reactionRequestsRef.current.delete(messageId);
+      realtimeReactionUpdatesRef.current.delete(messageId);
+      setPendingReactionMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    }
+  };
+
   const deleteMessage = async (messageId: string, scope: MessageDeleteScope): Promise<void> => {
     if (deletingMessageId) return;
     setDeletingMessageId(messageId);
@@ -505,10 +571,14 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                       isDownloadBusy={downloadingAttachmentId !== null}
                       canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
                       isDeleting={deletingMessageId !== null}
+                      isReactionPending={pendingReactionMessageIds.has(message.id)}
+                      currentUserId={currentUser.id}
+                      currentUserName={currentUser.name || currentUser.email}
                       message={message}
                       onDownloadAttachment={downloadAttachment}
                       loadImagePreview={loadImagePreview}
                       onDelete={(scope) => { void deleteMessage(message.id, scope); }}
+                      onToggleReaction={(emoji) => { void toggleReaction(message.id, emoji); }}
                       startsNewDay={startsNewDay}
                     />
                   ))}
@@ -537,7 +607,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                 </ul>
               ) : null}
               <div className="flex items-end gap-2 rounded-2xl border border-input bg-background p-2 shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
-                <Button aria-label="Attach files" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending} onClick={() => attachmentInputRef.current?.click()} size="icon" type="button" variant="ghost">
+                <Button aria-label="Attach files, up to 5 files and 10 MB each" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending} onClick={() => attachmentInputRef.current?.click()} size="icon" title="Up to 5 files · 10 MB each" type="button" variant="ghost">
                   <Paperclip aria-hidden="true" className="size-4" />
                 </Button>
                 <Textarea
@@ -555,13 +625,12 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                   <Send aria-hidden="true" className="size-4" />
                 </Button>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <div className="flex min-w-0 items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
                 {attachmentError
-                  ? <p className="text-xs text-destructive" role="alert">{attachmentError}</p>
-                  : <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck aria-hidden="true" className="size-3.5" />Only you and {conversation.otherParticipant.name} can read this conversation.</p>}
-                <span className="ml-auto text-xs text-muted-foreground">{Array.from(draft).length}/{DIRECT_MESSAGE_MAX_LENGTH} · Enter to send, Shift+Enter for a new line</span>
+                  ? <p className="min-w-0 truncate text-destructive" role="alert">{attachmentError}</p>
+                  : <p className="min-w-0 truncate">Enter sends · Shift+Enter for a new line</p>}
+                {draft.length > 0 ? <span className="shrink-0">{Array.from(draft).length}/{DIRECT_MESSAGE_MAX_LENGTH}</span> : null}
               </div>
-              <p className="px-1 text-[10px] text-muted-foreground">Up to 5 files, 10 MB each · JPG, PNG, GIF, WebP, PDF, TXT, CSV, MD</p>
             </form>
           </section>
         </>

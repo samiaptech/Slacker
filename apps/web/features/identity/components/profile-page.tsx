@@ -7,6 +7,7 @@ import { ArrowLeft, BadgeCheck, Copy, Mail, ShieldCheck, UserRound, Users } from
 import { Button, Input, Label } from "@workspace/ui";
 import { z } from "zod";
 import type { WorkspaceEmailVisibilityResponse, WorkspaceInviteLinkResponse } from "@workspace/types";
+import { application } from "@/constants/application";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { workspaceEmailVisibilitySchema, workspaceMembersSchema } from "../types";
 import { createAuthenticationClient } from "./auth-client";
@@ -259,7 +260,7 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground"><UserRound aria-hidden="true" className="size-5" /></span>
             <div>
               <h2 className="text-lg font-semibold text-foreground" id="profile-details-title">Your details</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Choose how teammates see you across Nutshyll.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Choose how teammates see you across {application.name}.</p>
             </div>
           </div>
           <form className="space-y-5" onSubmit={(event) => void saveName(event)}>
