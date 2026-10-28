@@ -60,12 +60,30 @@ event; the requesting client removes the message locally and later history
 loads remain filtered. Run `direct-messages:initialize` after deploying the
 updated strict message validator.
 
+`PATCH /direct-messages/:conversationId/messages/:messageId` accepts strict
+JSON `{ "text": "...", "expectedEditedAt": null | "<ISO timestamp>" }` (the
+version field may be omitted only for a first edit) and returns the complete
+updated message. Only the authenticated author may edit, and the caller must
+remain a participant in the selected workspace conversation; workspace admins
+cannot edit another member's message. Blank text, text over 4,000 Unicode code
+points, and attachment-only messages are rejected. The storage transaction
+compares `expectedEditedAt` atomically and changes only `text` and `editedAt`,
+preserving creation time, attachments, reactions, and conversation ordering.
+Stale edits return `409 message_edit_conflict`, and non-author edits return
+`403 message_edit_forbidden`. Successful persistence emits the complete message
+as `direct-message:updated` to the authorized conversation room. History,
+search, and reconnects use the stored edited text. Run
+`direct-messages:initialize` after deployment to install the `editedAt`
+validator field.
+
 ## Live delivery
 
 Socket.IO authenticates with the same session as channel chat. A client must
 first join an authorized workspace room, then prove current conversation
 participation before joining a workspace-scoped direct-message room. New
-messages are broadcast only after MongoDB persistence succeeds. Typing updates
+messages and author-only edits are broadcast only after MongoDB persistence
+succeeds (`direct-message:new` and `direct-message:updated`). Edits include the
+complete canonical message and do not reorder the conversation. Typing updates
 are rate-limited, use the authenticated socket identity, and require an
 authorized subscription.
 

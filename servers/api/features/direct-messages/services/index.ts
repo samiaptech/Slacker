@@ -3,5 +3,6 @@ export type {
   DirectConversationWithParticipant,
   DirectMessageService,
   DirectMessageWithSender,
-  DirectParticipant
+  DirectParticipant,
+  EditDirectMessageResult
 } from "./direct-message.service.js";

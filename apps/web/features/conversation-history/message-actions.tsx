@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactElement } from "react";
-import { EyeOff, MoreHorizontal, Trash2 } from "lucide-react";
+import { EyeOff, MoreHorizontal, PencilLine, Trash2 } from "lucide-react";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@workspace/ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@workspace/ui/primitives";
 
@@ -9,14 +9,18 @@ export type MessageDeleteScope = "me" | "everyone";
 
 type MessageActionsProps = Readonly<{
   canDeleteForEveryone: boolean;
+  canEdit?: boolean | undefined;
   disabled: boolean;
   onDelete: (scope: MessageDeleteScope) => void;
+  onEdit?: (() => void) | undefined;
 }>;
 
 export const MessageActions = ({
   canDeleteForEveryone,
+  canEdit = false,
   disabled,
-  onDelete
+  onDelete,
+  onEdit
 }: MessageActionsProps): ReactElement => {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -36,6 +40,12 @@ export const MessageActions = ({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {canEdit && onEdit ? (
+            <DropdownMenuItem onSelect={() => onEdit()}>
+              <PencilLine aria-hidden="true" />
+              Edit message
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onSelect={() => onDelete("me")}>
             <EyeOff aria-hidden="true" />
             Delete for me

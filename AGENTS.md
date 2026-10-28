@@ -102,11 +102,10 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-27.
+Updated: 2026-10-28.
 
-- **Suggested next chat features:** Prioritize emoji reactions first for high value and
-  contained scope, then message editing for authors with edited indicators and consistent
-  history/search/realtime updates. Add per-member channel notification controls with clear
+- **Suggested next chat features:** Emoji reactions and author-only message editing are
+  implemented; next consider per-member channel notification controls with clear
   All / Mentions only / Muted behavior, then private saved messages with navigation back to
   the source conversation. Threads/replies are the broadest change; plan them separately
   across persistence, history, notifications, unread state, realtime, and mobile UX, with an
@@ -115,7 +114,7 @@ Updated: 2026-10-27.
 - **Ownership:** Codex handles frontend design and interactions; the backend agent handles
   APIs, contracts, persistence, authorization, and backend validation. Coordinate changes
   to shared contracts explicitly.
-- **Saved work:** Local branch `slacker` remains at `32fb907`; frontend workspace-shell
+- **Saved work:** Local branch `slacker` is at `159cbc7`; frontend workspace-shell
   and chat styling changes are currently unstaged in the shared checkout. The project
   snapshot is also pushed to `samiaptech/Slacker:feature/nutshyll-sync` at `50d0386`.
   These refs have different parent histories; do not assume the local branch tracks the
@@ -533,3 +532,26 @@ Updated: 2026-10-27.
   `pnpm run initialize` against the intended database before deployment, then restart the
   API and verify channel history, websocket updates, emoji replacement, and same-emoji
   removal.
+
+- **Message editing:** Added author-only PATCH endpoints for channel and DM messages with
+  current member/participant authorization, atomic `expectedEditedAt` checks, `editedAt`
+  persistence, conflict/validation errors, complete updated-message responses, and typed
+  `channel:message:updated` / `direct-message:updated` broadcasts after successful writes.
+  Edits preserve creation time, attachments, reactions, notifications, and conversation order;
+  attachment-only messages are not editable. API suite passed (169 passed, 2 optional MongoDB
+  tests skipped); API typecheck/build, focused ESLint, shared-types typecheck/lint, and
+  `git diff --check` passed. No live database migration or populated-browser verification ran.
+  Before deployment, run `pnpm run initialize` against the intended database to install the
+  updated channel/DM validators. Frontend owner: verify save, conflict recovery, and live
+  synchronization in a populated workspace. Changes remain local and uncommitted on `slacker`
+  at `159cbc7`; the shared checkout also contains unrelated frontend edits. No commit or push
+  was made. CI follow-up: the hosted run for `159cbc7` failed before validation because the
+  workflow selected Node 20 while pnpm 11.19.0 requires Node 22.13 or newer; the workflow now
+  selects Node 22. Web tests now build `@workspace/types` before running, its package export
+  supports the test runner, and the channel message expectation includes `reactions` and
+  `editedAt`. Full local `pnpm run validate` passes: control-plane checks, lint, typecheck,
+  all unit tests, and production builds. API tests: 169 passed, 2 optional MongoDB tests
+  skipped; web tests: 29 passed. Lint reports one pre-existing navigation warning in
+  `apps/web/features/identity/components/workspace-access.tsx`. The hosted workflow has not
+  rerun because these changes are uncommitted; deploy/browser and live MongoDB checks remain
+  outstanding.

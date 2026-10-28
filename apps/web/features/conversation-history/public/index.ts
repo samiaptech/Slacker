@@ -7,6 +7,9 @@ export type { HistoryScrollAnchor } from "../scroll-position";
 export { MessageActions } from "../message-actions";
 export type { MessageDeleteScope } from "../message-actions";
 export { getMessageDeleteFailure } from "../message-delete-response";
+export { getMessageEditFailure } from "../message-edit-response";
+export { MessageInlineEditor } from "../message-inline-editor";
+export { useMessageEdit } from "../use-message-edit";
 export {
   findMatchingPendingMessageId,
   removePendingMessage,

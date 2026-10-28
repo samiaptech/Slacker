@@ -228,6 +228,73 @@ export const createMongoDirectMessageStorage = (
         throw error;
       }
     },
+    editMessageForMember: async (
+      workspaceId,
+      conversationId,
+      userId,
+      messageId,
+      text,
+      expectedEditedAt,
+      editedAt
+    ) => {
+      await ensureReady();
+      try {
+        return await withTransaction(async (session) => {
+          const conversation = await conversations.findOne({
+            _id: conversationId,
+            workspaceId,
+            participantIds: userId
+          }, { session });
+          if (!conversation) return Object.freeze({ kind: "not-found" as const });
+          const message = await messages.findOne({
+            _id: messageId,
+            workspaceId,
+            conversationId,
+            hiddenForUserIds: { $nin: [userId] }
+          }, { session });
+          if (!message) return Object.freeze({ kind: "not-found" as const });
+          if (message.senderId !== userId) return Object.freeze({ kind: "forbidden" as const });
+          if (message.text.trim().length === 0) return Object.freeze({ kind: "not-editable" as const });
+          if ((message.editedAt ?? null)?.getTime() !== expectedEditedAt?.getTime()) {
+            return Object.freeze({ kind: "conflict" as const });
+          }
+          const updated = await messages.updateOne({
+            _id: messageId,
+            workspaceId,
+            conversationId,
+            senderId: userId,
+            hiddenForUserIds: { $nin: [userId] },
+            ...(expectedEditedAt === null
+              ? { $or: [{ editedAt: { $exists: false } }, { editedAt: null }] }
+              : { editedAt: expectedEditedAt })
+          }, {
+            $set: { text, editedAt }
+          }, { session });
+          if (updated.matchedCount === 0) return Object.freeze({ kind: "conflict" as const });
+          const updatedMessage = await messages.findOne({
+            _id: messageId,
+            workspaceId,
+            conversationId
+          }, { session });
+          if (!updatedMessage) return Object.freeze({ kind: "not-found" as const });
+          const messageReactions = await listStoredMessageReactions(database, session, {
+            workspaceId,
+            scope: "direct-message",
+            parentId: conversationId,
+            messageIds: [messageId],
+            userId
+          });
+          return Object.freeze({
+            kind: "updated" as const,
+            message: updatedMessage,
+            reactions: messageReactions
+          });
+        });
+      } catch (error: unknown) {
+        if (isUnsupportedTransaction(error)) throw storageUnavailable;
+        throw error;
+      }
+    },
     findAttachmentForMember: async (workspaceId, conversationId, userId, messageId, attachmentId) => {
       await ensureReady();
       return withTransaction(async (session) => {

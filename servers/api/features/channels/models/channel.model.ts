@@ -23,6 +23,7 @@ export type ChannelMessageDocument = Readonly<{
   senderId?: string;
   text: string;
   createdAt: Date;
+  editedAt?: Date | null;
   type?: "message" | "system";
   systemEvent?: "member_left";
   actorId?: string;
@@ -136,6 +137,7 @@ export const CHANNEL_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
       leftAt: Object.freeze({ bsonType: "date" }),
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
+      editedAt: Object.freeze({ bsonType: ["date", "null"] }),
       hiddenForUserIds: Object.freeze({
         bsonType: "array",
         uniqueItems: true,

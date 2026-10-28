@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, Input, Label, PageShell } from "@workspace/ui";
 import { Skeleton } from "@workspace/ui/primitives";
 import { z } from "zod";
@@ -78,6 +79,7 @@ const WorkspaceLoadingSkeleton = (): ReactElement => (
 );
 
 export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: WorkspaceAccessProps): ReactElement => {
+  const router = useRouter();
   const authenticationClient = useMemo(() => createAuthenticationClient(apiBaseUrl), [apiBaseUrl]);
   const [stage, setStage] = useState<PageStage>("loading");
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceMembershipSummary[]>([]);
@@ -113,7 +115,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
           storedAccessRequest
         ]);
         if (response.status === 401) {
-          window.location.assign(new URL("/sign-in", window.location.origin));
+          router.replace("/sign-in");
           return;
         }
         if (response.status === 503) {
@@ -141,7 +143,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
             signal: controller.signal
           });
         if (accessResponse.status === 401) {
-          window.location.assign(new URL("/sign-in", window.location.origin));
+          router.replace("/sign-in");
           return;
         }
         if (accessResponse.status === 503) {
@@ -164,7 +166,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     };
     void loadWorkspaces();
     return () => controller.abort();
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, router]);
 
   const selectWorkspace = (workspaceId: string): void => {
     const selected = workspaces.find((workspace) => workspace.id === workspaceId);
@@ -181,15 +183,43 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
       apiBaseUrl
     ), { method: "DELETE", credentials: "include", cache: "no-store" });
     if (response.status === 401) {
-      window.location.assign(new URL("/sign-in", window.location.origin));
+      router.replace("/sign-in");
       return;
     }
     if (response.status === 409) throw new Error("You are the last workspace admin. Assign another admin before leaving.");
     if (!response.ok) throw new Error("You could not leave this workspace. Please try again.");
     const nextWorkspace = workspaces.find((workspace) => workspace.id !== activeWorkspace.id);
-    if (nextWorkspace) window.localStorage.setItem("nutshyll.activeWorkspaceId", nextWorkspace.id);
-    else window.localStorage.removeItem("nutshyll.activeWorkspaceId");
-    window.location.assign("/");
+    const remainingWorkspaces = workspaces.filter((workspace) => workspace.id !== activeWorkspace.id);
+    setWorkspaces(remainingWorkspaces);
+    if (nextWorkspace) {
+      window.localStorage.setItem("nutshyll.activeWorkspaceId", nextWorkspace.id);
+      try {
+        const accessResponse = await fetch(new URL("/workspace", apiBaseUrl), {
+          credentials: "include",
+          cache: "no-store",
+          headers: { "X-Workspace-Id": nextWorkspace.id }
+        });
+        if (!accessResponse.ok) throw new Error("Workspace access could not be verified.");
+        const parsedAccess = workspaceAccessSchema.safeParse(await accessResponse.json());
+        if (!parsedAccess.success) throw new Error("The server returned invalid workspace access.");
+        setActiveWorkspace(nextWorkspace);
+        setAccess(parsedAccess.data);
+        setStage("ready");
+      } catch {
+        setActiveWorkspace(null);
+        setAccess(null);
+        setErrorMessage("You left the workspace, but the next workspace could not be loaded. Retry to continue.");
+        setStage("error");
+      }
+    } else {
+      window.localStorage.removeItem("nutshyll.activeWorkspaceId");
+      setActiveWorkspace(null);
+      setAccess(null);
+      setNewWorkspace(null);
+      setWorkspaceName("");
+      setStage("create");
+    }
+    router.replace("/");
   };
 
   const setCurrentUserProfile = (profile: Readonly<{ name: string; title: string | null }>): void => {
@@ -210,7 +240,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
         body: JSON.stringify({ name: workspaceName })
       });
       if (response.status === 401) {
-        window.location.assign(new URL("/sign-in", window.location.origin));
+        router.replace("/sign-in");
         return;
       }
       if (response.status === 503) {
@@ -289,7 +319,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     } catch {
       setErrorMessage("Sign out could not be confirmed.");
     }
-    window.location.assign(new URL("/sign-in", window.location.origin));
+    router.replace("/sign-in");
   };
 
   return (

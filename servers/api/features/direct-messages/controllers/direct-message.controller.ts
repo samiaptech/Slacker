@@ -34,6 +34,7 @@ type DirectWorkspaceAccessResult =
   | Readonly<{ kind: "allowed"; access: Readonly<{ workspace: Readonly<{ id: string; role: "admin" | "member" }> }> }>;
 type DirectMessageRealtime = Readonly<{
   publishDirectMessage: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
+  publishMessageUpdated: (workspaceId: string, conversationId: string, message: DirectMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, conversationId: string, messageId: string) => void;
   publishMessageReactions: (
     workspaceId: string,
@@ -68,6 +69,10 @@ const openBodySchema = z.object({ recipientId: z.string().trim().min(1).max(128)
 const messageBodySchema = z.object({
   text: z.string().default("")
     .refine((text) => Array.from(text).length <= DIRECT_MESSAGE_MAX_LENGTH)
+}).strict();
+const editMessageBodySchema = z.object({
+  text: z.string().refine((text) => Array.from(text).length <= DIRECT_MESSAGE_MAX_LENGTH),
+  expectedEditedAt: z.iso.datetime().nullable().optional()
 }).strict();
 const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
 const reactionBodySchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJI) }).strict();
@@ -116,6 +121,7 @@ const toMessageResponse = (message: DirectMessageWithSender): DirectMessageRespo
     senderId: message.senderId,
     text: message.text,
     createdAt: message.createdAt.toISOString(),
+    ...(message.editedAt !== undefined ? { editedAt: message.editedAt?.toISOString() ?? null } : {}),
     reactions: message.reactions,
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment): ChatAttachmentResponse => ({
     id: attachment.id,
@@ -174,6 +180,94 @@ export const createToggleDirectMessageReactionController = (
       reactions: result.reactions
     };
     realtime?.publishMessageReactions(access.workspaceId, conversationId, body);
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createEditDirectMessageController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendAccessError(access.kind, next);
+      return;
+    }
+    const { conversationId, messageId } = request.params;
+    if (typeof conversationId !== "string" || typeof messageId !== "string"
+      || !conversationId || !messageId) {
+      sendNotFound(next);
+      return;
+    }
+    const parsed = editMessageBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "body", reason: "invalid_message_edit" }
+      }));
+      return;
+    }
+    const expectedEditedAt = parsed.data.expectedEditedAt
+      ? new Date(parsed.data.expectedEditedAt)
+      : null;
+    const result = await service.editMessage(
+      access.workspaceId,
+      conversationId,
+      access.userId,
+      messageId,
+      parsed.data.text,
+      expectedEditedAt,
+      access.senderProfile
+    );
+    if (result.kind === "unavailable") {
+      sendUnavailable(next);
+      return;
+    }
+    if (result.kind === "not-found") {
+      sendNotFound(next);
+      return;
+    }
+    if (result.kind === "forbidden") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageEditForbidden,
+        message: ERROR_MESSAGES.messageEditForbidden,
+        status: HTTP_STATUS.forbidden
+      }));
+      return;
+    }
+    if (result.kind === "conflict") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageEditConflict,
+        message: ERROR_MESSAGES.messageEditConflict,
+        status: HTTP_STATUS.conflict
+      }));
+      return;
+    }
+    if (result.kind === "not-editable") {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "text", reason: "message_not_editable" }
+      }));
+      return;
+    }
+    if (result.kind === "invalid") {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "text", reason: result.error }
+      }));
+      return;
+    }
+    const body = toMessageResponse(result.message);
+    realtime?.publishMessageUpdated(access.workspaceId, conversationId, body);
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
     next(error);

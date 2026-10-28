@@ -17,6 +17,7 @@ import {
   createListChannelsController,
   createListChannelMessagesController,
   createDeleteChannelMessageController,
+  createEditChannelMessageController,
   createToggleChannelMessageReactionController,
   createAuthorizeChannelMessageUploadController,
   createSendChannelMessageController,
@@ -119,6 +120,10 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
   router.delete(
     "/channels/:channelId/messages/:messageId",
     createDeleteChannelMessageController(messageDependencies)
+  );
+  router.patch(
+    "/channels/:channelId/messages/:messageId",
+    createEditChannelMessageController(messageDependencies)
   );
   router.post(
     "/channels/:channelId/messages/:messageId/reactions",

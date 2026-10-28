@@ -60,6 +60,33 @@ const createMemoryStorage = (): DirectMessageStorage => {
       messages.get(conversationId)?.push(message);
       return Promise.resolve(true);
     },
+    editMessageForMember: (
+      workspaceId,
+      conversationId,
+      userId,
+      messageId,
+      text,
+      expectedEditedAt,
+      editedAt
+    ) => {
+      const conversation = [...conversations.values()].find((entry) =>
+        entry.workspaceId === workspaceId && entry._id === conversationId && entry.participantIds.includes(userId));
+      if (!conversation) return Promise.resolve({ kind: "not-found" as const });
+      const conversationMessages = messages.get(conversationId) ?? [];
+      const index = conversationMessages.findIndex((message) => message._id === messageId
+        && message.workspaceId === workspaceId && message.conversationId === conversationId
+        && !message.hiddenForUserIds?.includes(userId));
+      const message = conversationMessages[index];
+      if (!message) return Promise.resolve({ kind: "not-found" as const });
+      if (message.senderId !== userId) return Promise.resolve({ kind: "forbidden" as const });
+      if (message.text.trim().length === 0) return Promise.resolve({ kind: "not-editable" as const });
+      if ((message.editedAt ?? null)?.getTime() !== expectedEditedAt?.getTime()) {
+        return Promise.resolve({ kind: "conflict" as const });
+      }
+      const updatedMessage = { ...message, text, editedAt };
+      conversationMessages[index] = updatedMessage;
+      return Promise.resolve({ kind: "updated" as const, message: updatedMessage, reactions: [] });
+    },
     deleteMessageForMember: (workspaceId, conversationId, userId, messageId, scope, isWorkspaceAdmin) => {
       const conversation = [...conversations.values()].find((entry) =>
         entry.workspaceId === workspaceId && entry._id === conversationId && entry.participantIds.includes(userId));
@@ -320,4 +347,36 @@ void test("paginates equal-timestamp DM history without gaps or duplicate messag
   const receivedIds = pages.flat();
   assert.deepEqual(receivedIds.slice().sort(), sentIds.slice().sort());
   assert.equal(new Set(receivedIds).size, sentIds.length);
+});
+
+void test("edits an authored DM with optimistic version checking and retains its conversation position", async () => {
+  const storage = createMemoryStorage();
+  const service = createService(storage);
+  const opened = await service.open("workspace-1", "alice", "bob");
+  assert.ok("conversation" in opened);
+  const sent = await service.send("workspace-1", opened.conversation.id, "alice", "Original");
+  assert.ok("message" in sent);
+
+  const firstEdit = await service.editMessage(
+    "workspace-1",
+    opened.conversation.id,
+    "alice",
+    sent.message.id,
+    "Edited",
+    null
+  );
+  assert.equal(firstEdit.kind, "updated");
+  assert.equal(firstEdit.message.text, "Edited");
+  assert.equal(firstEdit.message.editedAt?.toISOString(), "2026-10-20T00:00:00.000Z");
+  assert.equal(firstEdit.message.createdAt.toISOString(), sent.message.createdAt.toISOString());
+
+  const staleEdit = await service.editMessage(
+    "workspace-1",
+    opened.conversation.id,
+    "alice",
+    sent.message.id,
+    "Stale edit",
+    null
+  );
+  assert.deepEqual(staleEdit, { kind: "conflict" });
 });

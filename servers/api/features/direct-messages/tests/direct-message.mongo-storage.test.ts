@@ -170,3 +170,70 @@ void test("scopes DM deletion to participants, persists personal hides, and appl
   assert.equal(calls.filter(({ operation }) => operation === "update").length, 1);
   assert.equal(calls.filter(({ operation }) => operation === "delete").length, 1);
 });
+
+void test("edits DM messages only for participants/authors and atomically checks the expected version", async () => {
+  const message = {
+    _id: "message-1",
+    workspaceId: "workspace-1",
+    conversationId: "conversation-1",
+    senderId: "alice",
+    text: "original",
+    createdAt: new Date("2026-10-22T00:00:00.000Z")
+  };
+  let writeFilter: unknown;
+  let writeUpdate: unknown;
+  const database = {
+    listCollections: ({ name }: Readonly<{ name: string }>) => ({
+      next: () => {
+        const definition = collectionDefinitions.find((collection) => collection.name === name);
+        return Promise.resolve(definition
+          ? { name, options: { validator: definition.validator } }
+          : null);
+      }
+    }),
+    collection: (name: string) => ({
+      indexes: () => Promise.resolve(collectionDefinitions.find((collection) => collection.name === name)?.indexes.map((index) => ({
+        name: index.options.name,
+        key: Object.values(index.keys).includes("text") ? { _fts: "text", _ftsx: 1 } : index.keys,
+        ...(Object.values(index.keys).includes("text") ? { weights: { text: 1 } } : {}),
+        unique: index.options.unique,
+        ...(index.options.name === "message_reaction_active_user_unique"
+          ? { partialFilterExpression: { active: true } }
+          : {})
+      })) ?? []),
+      findOne: (filter: Readonly<Record<string, unknown>>) => Promise.resolve(
+        name === DIRECT_CONVERSATIONS_COLLECTION
+          ? filter.participantIds === "outsider" ? null : {
+            _id: "conversation-1",
+            workspaceId: "workspace-1",
+            participantIds: ["alice", "bob"]
+          }
+          : message
+      ),
+      updateOne: (filter: unknown, update: unknown) => {
+        writeFilter = filter;
+        writeUpdate = update;
+        return Promise.resolve({ matchedCount: 1 });
+      },
+      aggregate: () => ({ toArray: () => Promise.resolve([]) })
+    })
+  } as unknown as MongoDatabase;
+  const storage = createMongoDirectMessageStorage(database, (operation) => operation({} as never));
+  const editedAt = new Date("2026-10-22T00:00:00.001Z");
+
+  assert.deepEqual(await storage.editMessageForMember(
+    "workspace-1", "conversation-1", "outsider", "message-1", "edited", null, editedAt
+  ), { kind: "not-found" });
+  assert.deepEqual(await storage.editMessageForMember(
+    "workspace-1", "conversation-1", "bob", "message-1", "edited", null, editedAt
+  ), { kind: "forbidden" });
+  const edited = await storage.editMessageForMember(
+    "workspace-1", "conversation-1", "alice", "message-1", "edited", null, editedAt
+  );
+  assert.equal(edited.kind, "updated");
+  assert.deepEqual((writeFilter as { $or: unknown }).$or, [
+    { editedAt: { $exists: false } },
+    { editedAt: null }
+  ]);
+  assert.deepEqual(writeUpdate, { $set: { text: "edited", editedAt } });
+});

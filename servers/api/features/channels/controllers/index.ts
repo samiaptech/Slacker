@@ -11,6 +11,7 @@ export { createJoinChannelController, createLeaveChannelController } from "./cha
 export {
   createAuthorizeChannelMessageUploadController,
   createDeleteChannelMessageController,
+  createEditChannelMessageController,
   createDownloadChannelAttachmentController,
   createListChannelMessagesController,
   createSendChannelMessageController

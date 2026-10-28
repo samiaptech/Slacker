@@ -278,6 +278,51 @@ ho sakti hai.
 
 ## 10. Realtime aur notifications
 
+### 10.1 API vs Socket/WebSocket — sahi architecture rule
+
+Project ka architecture hybrid hai, lekin rule clear hai:
+
+- `API` = source of truth, validation, authorization, persistence, fetch, pagination aur
+  recovery layer.
+- `Socket/WebSocket` = live event delivery layer sirf tab jab state already API se save ho
+  chuki ho.
+
+Yani message create/edit/delete/reaction/toggle ko socket ke zariye direct mutate nahi karna
+chaiye. Har mutation ko pehle API se validate aur persist karna chahiye; phir server us result
+ko relevant clients par realtime broadcast karta hai.
+
+Sahi flow:
+
+1. Client request API par jata hai.
+2. API user identity, workspace membership, message existence aur permissions check karta hai.
+3. Database transaction/operation run hoti hai.
+4. API response success deta hai.
+5. Server matching realtime event emit karta hai.
+6. Clients jo active screen par hain, socket event ke throughupdate receive karte hain.
+7. Agar socket disconnect ho jaye to client history API se fresh state fetch karta hai.
+
+Aisi cheezein jo socket ke zariye ho sakti hain:
+- typing indicator
+- member online/offline presence
+- channel/DM live updates
+- reaction live counts/message row update
+- message delete/edit broadcast
+- notification bell live refresh
+
+Aisi cheezein jo API ke bina nahi honi chahiye:
+- message creation with validation
+- edit with author check + conflict check
+- delete with permission check
+- upload/attachment authorization
+- DM create/accept and membership validation
+- search and paginated fetch
+- reload recovery after disconnect
+
+Yeh rule project-wide laga hai. Socket ko “one and only backend” nahi mana jata; socket sirf
+live fan-out layer hai. Agar app reconnect ho jaye to API hi state ka trusted source banta hai.
+
+### 10.2 Active implementation details
+
 - [ChannelRealtimeProvider](../apps/web/features/channels/components/channel-realtime-provider.tsx#L32)
   cookie credential ke saath WebSocket-only Socket.IO connection banata aur active workspace
   subscribe karta. Channel/DM page apne munasib channel/conversation events subscribe karte.
@@ -290,6 +335,10 @@ ho sakti hai.
 - Message send API notification service ko bhi call karta:
   [notification service](../servers/api/features/notifications/service.ts#L65).
   Channel/DM history kholne par us resource ki notifications read mark hoti hain.
+
+Is policy ko message editing planning mein bhi follow karna chahiye: `PATCH` API se edited text
+save hoga aur server phir `message:updated` realtime event broadcast karega, socket sirf UI ko
+update karne ke liye use hoga. Direct socket-only edit logic kabhi accepted nahi hoga.
 
 ## 11. Database initialization
 
@@ -355,3 +404,41 @@ mehdood nahi.
   [channel.route.test.ts](../servers/api/features/channels/tests/channel.route.test.ts#L875)
   aur [direct-message.route.test.ts](../servers/api/features/direct-messages/tests/direct-message.route.test.ts#L31)
   mein route response, identity, validation aur participant denial cover karti hai.
+
+## 14. Message editing — channel aur DM
+
+- Frontend dono conversations mein `PATCH /channels/:channelId/messages/:messageId` ya
+  `PATCH /direct-messages/:conversationId/messages/:messageId` ko strict JSON
+  `{ "text": "...", "expectedEditedAt": null | "<ISO timestamp>" }` bhejta hai.
+  `expectedEditedAt` omit kiya ja sakta hai sirf first edit ke liye; backend usay `null`
+  samajhta hai.
+- Channel route/controller
+  [channel.route.ts](../servers/api/features/channels/routes/channel.route.ts#L126) aur
+  [createEditChannelMessageController](../servers/api/features/channels/controllers/channel-message.controller.ts#L146)
+  se chalte hain; DM equivalents
+  [direct-message.route.ts](../servers/api/features/direct-messages/routes/direct-message.route.ts#L95)
+  aur [createEditDirectMessageController](../servers/api/features/direct-messages/controllers/direct-message.controller.ts#L189)
+  mein hain. Workspace authentication ke baad storage current channel membership ya DM
+  participation, message visibility aur author identity verify karta hai. Admin doosray
+  member ka message edit nahi kar sakta.
+- Service blank text aur 4,000 Unicode code points limit validate karti hai. Attachment-only
+  message `400 validation_error` ke saath reject hota hai; normal text-plus-attachment message
+  edit karne par files bilkul change nahi hotin.
+- [Channel Mongo storage](../servers/api/features/channels/integrations/mongo-channel-message.storage.ts#L193)
+  aur [DM Mongo storage](../servers/api/features/direct-messages/integrations/mongo-direct-message.storage.ts#L231)
+  transaction mein `expectedEditedAt` ko conditional write filter se compare karte hain.
+  Concurrent stale write `409 message_edit_conflict`; non-author `403 message_edit_forbidden`;
+  hidden, missing, ya inaccessible target privacy-safe `404` deta hai. Successful update sirf
+  `text` aur `editedAt` badalta hai; `createdAt`, attachments, reactions, notifications aur
+  conversation ordering preserve rehte hain.
+- Success response poora latest message (sender, reactions, authorized attachment URLs,
+  `editedAt`) deta hai. Storage commit ke baad
+  [channel realtime](../servers/api/features/channels/realtime/channel-realtime.ts#L264)
+  `channel:message:updated`, aur
+  [DM realtime](../servers/api/features/direct-messages/realtime/direct-message-realtime.ts#L159)
+  `direct-message:updated` sirf conversation room mein broadcast karta hai. API canonical
+  source rehti hai; reconnect par history/search mein naya persisted text milta hai.
+- Deployment par root `pnpm run initialize`, ya dono feature initializers, chalana zaroori
+  hai kyunki strict channel/DM message validators ab `editedAt` allow karte hain. API suite
+  169 passed / 2 optional Mongo tests skipped, API typecheck/build aur focused ESLint pass;
+  live MongoDB migration aur populated-browser flow abhi verify nahi hue.

@@ -17,6 +17,8 @@ export const ERROR_MESSAGES = Object.freeze({
   chatAttachmentStorageUnavailable: "Chat attachment storage is temporarily unavailable.",
   messageDeleteForbidden: "Only the message author or a workspace administrator can delete for everyone.",
   messageDeleteCleanupFailed: "The message was deleted, but one or more attached files could not be cleaned up.",
+  messageEditForbidden: "Only the message author can edit this message.",
+  messageEditConflict: "This message has changed. Reload it before saving your edit again.",
   messageSearchUnavailable: "Message search is temporarily unavailable.",
   rateLimited: "Search request limit reached. Wait before searching again.",
   apiRateLimited: "API request limit reached. Wait before trying again.",

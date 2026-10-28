@@ -18,6 +18,19 @@ export type DirectMessageDeleteResult =
   | Readonly<{ kind: "not-found" }>
   | Readonly<{ kind: "forbidden" }>;
 
+export type DirectMessageEditStorageResult =
+  | Readonly<{
+    kind: "updated";
+    message: DirectMessageDocument;
+    reactions: readonly StoredMessageReaction[];
+  }>
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "forbidden" }>
+  | Readonly<{ kind: "not-editable" }>
+  | Readonly<{ kind: "conflict" }>;
+export type DirectMessageEditResult = Exclude<DirectMessageEditStorageResult, { kind: "updated" }> |
+  Readonly<{ kind: "updated"; message: DirectMessage; reactions: readonly StoredMessageReaction[] }>;
+
 export type DirectMessageStorage = Readonly<{
   initialize: () => Promise<void>;
   openForMember: (
@@ -45,6 +58,15 @@ export type DirectMessageStorage = Readonly<{
     userId: string,
     message: DirectMessageDocument
   ) => Promise<boolean>;
+  editMessageForMember: (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    editedAt: Date
+  ) => Promise<DirectMessageEditStorageResult>;
   deleteMessageForMember: (
     workspaceId: string,
     conversationId: string,
@@ -94,6 +116,7 @@ const toMessage = (document: DirectMessageDocument): DirectMessage => Object.fre
   senderId: document.senderId,
   text: document.text,
   createdAt: document.createdAt,
+  ...(document.editedAt !== undefined ? { editedAt: document.editedAt } : {}),
   ...(document.attachments && document.attachments.length > 0
     ? { attachments: document.attachments }
     : {})
@@ -115,6 +138,7 @@ const toMessageDocument = (message: DirectMessage): DirectMessageDocument => Obj
   senderId: message.senderId,
   text: message.text,
   createdAt: message.createdAt,
+  ...(message.editedAt !== undefined ? { editedAt: message.editedAt } : {}),
   ...(message.attachments && message.attachments.length > 0
     ? { attachments: message.attachments }
     : {})
@@ -166,6 +190,27 @@ export const createDirectMessageRepository = (storage: DirectMessageStorage) => 
     userId,
     toMessageDocument(message)
   ),
+  editMessageForMember: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    editedAt: Date
+  ) => {
+    const result = await storage.editMessageForMember(
+      workspaceId,
+      conversationId,
+      userId,
+      messageId,
+      text,
+      expectedEditedAt,
+      editedAt
+    );
+    if (result.kind !== "updated") return result;
+    return Object.freeze({ ...result, message: toMessage(result.message) });
+  },
   deleteMessageForMember: storage.deleteMessageForMember,
   ...(storage.listReactionsForMember
     ? { listReactionsForMember: storage.listReactionsForMember }

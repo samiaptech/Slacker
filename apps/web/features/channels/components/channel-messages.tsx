@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
 import { FileText, Paperclip, Pin, Send, X } from "lucide-react";
-import type { MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
+import type { ChannelMessageResponse, MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
 import {
   channelMessageListResponseSchema,
@@ -26,7 +26,8 @@ import {
   type MessageDeleteScope,
   type MessageWithDelivery,
   optimisticallyToggleMessageReaction,
-  requestMessageReaction
+  requestMessageReaction,
+  useMessageEdit
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -134,6 +135,33 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const typingUsersTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const isTypingRef = useRef(false);
   const shouldScrollToBottom = useRef(true);
+  const getEditableMessage = useCallback((messageId: string): ChannelMessageView | undefined =>
+    messages.find((entry): entry is MessageWithDelivery<ChannelMessageView> =>
+      isPendingChannelMessage(entry) && entry.id === messageId
+    ), [messages]);
+  const updateEditedMessage = useCallback((updated: ChannelMessageView): void => {
+    setMessages((current) => current.map((entry) =>
+      entry.id === updated.id && isPendingChannelMessage(entry) ? { ...entry, ...updated } : entry
+    ));
+  }, []);
+  const getEditEndpoint = useCallback((messageId: string): string =>
+    `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+  [channelId]);
+  const parseEditedMessage = useCallback((payload: unknown): ChannelMessageView | null => {
+    const parsed = channelMessageResponseSchema.safeParse(payload);
+    return parsed.success && parsed.data.channelId === channelId ? parsed.data : null;
+  }, [channelId]);
+  const reloadMessages = useCallback((): void => setReloadToken((current) => current + 1), []);
+  const messageEdit = useMessageEdit({
+    apiBaseUrl,
+    workspaceId: activeWorkspace.id,
+    endpoint: getEditEndpoint,
+    getMessage: getEditableMessage,
+    updateMessage: updateEditedMessage,
+    parseResponse: parseEditedMessage,
+    reload: reloadMessages
+  });
+  const receiveRealtimeUpdate = messageEdit.receiveRealtimeUpdate;
   useEffect(() => {
     realtimeSocketRef.current = realtime.socket;
   }, [realtime.socket]);
@@ -228,6 +256,11 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       shouldScrollToBottom.current = true;
       setMessages((current) => mergeIncomingMessages(current, [message]));
     };
+    const onMessageUpdated = (message: ChannelMessageResponse): void => {
+      const parsed = channelMessageResponseSchema.safeParse(message);
+      if (!parsed.success || parsed.data.channelId !== channelId) return;
+      receiveRealtimeUpdate(parsed.data);
+    };
     const onSystemMessage = (message: Extract<ChannelHistoryEntryView, { type: "system" }>): void => {
       if (message.channelId !== channelId) return;
       shouldScrollToBottom.current = true;
@@ -276,6 +309,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     };
     socket.on("channel:ready", onChannelReady);
     socket.on("channel:message:new", onMessage);
+    socket.on("channel:message:updated", onMessageUpdated);
     socket.on("channel:system:new", onSystemMessage);
     socket.on("channel:message:deleted", onMessageDeleted);
     socket.on("channel:message:reactions", onMessageReactions);
@@ -286,6 +320,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     return () => {
       socket.off("channel:ready", onChannelReady);
       socket.off("channel:message:new", onMessage);
+      socket.off("channel:message:updated", onMessageUpdated);
       socket.off("channel:system:new", onSystemMessage);
       socket.off("channel:message:deleted", onMessageDeleted);
       socket.off("channel:message:reactions", onMessageReactions);
@@ -298,7 +333,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       typingUserTimeouts.clear();
       setTypingUsers([]);
     };
-  }, [activeWorkspace.id, channelId, realtime.socket, realtime.workspaceReady, revokeAccess]);
+  }, [activeWorkspace.id, channelId, realtime.socket, realtime.workspaceReady, receiveRealtimeUpdate, revokeAccess]);
 
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
@@ -650,7 +685,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
           </div>
         </div>
       ) : null}
-      {messageActionError ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError}</p> : null}
+      {messageActionError || messageEdit.error ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError ?? messageEdit.error}</p> : null}
 
       <div aria-live="polite" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-2 sm:px-8 sm:py-2" ref={scrollContainerRef}>
         {isLoading ? (
@@ -690,15 +725,23 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                     downloadingAttachmentId={downloadingAttachmentId}
                     isDownloadBusy={downloadingAttachmentId !== null}
                     canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
+                    canEdit={message.senderId === currentUser.id && Boolean(message.text)}
                     isDeleting={deletingMessageId !== null}
+                    isEditing={messageEdit.editingMessageId === message.id}
+                    isSavingEdit={messageEdit.savingMessageId === message.id}
                     isReactionPending={pendingReactionMessageIds.has(message.id)}
                     currentUserId={currentUser.id}
                     currentUserName={currentUser.name || currentUser.email}
+                    editDraft={messageEdit.editingMessageId === message.id ? messageEdit.draft : message.text}
                     message={message}
-                    onDownloadAttachment={downloadAttachment}
-                    loadImagePreview={loadImagePreview}
+                    onCancelEdit={messageEdit.cancelEdit}
                     onDelete={(scope) => { void deleteMessage(message.id, scope); }}
+                    onDownloadAttachment={downloadAttachment}
+                    onEdit={() => { messageEdit.beginEdit(message); }}
+                    onEditChange={messageEdit.setDraft}
+                    onSaveEdit={() => { void messageEdit.saveEdit(message.id); }}
                     onToggleReaction={(emoji) => { void toggleReaction(message.id, emoji); }}
+                    loadImagePreview={loadImagePreview}
                     startsNewDay={startsNewDay}
                   />
                 ))}

@@ -19,6 +19,19 @@ export type MessageDeleteResult =
   | Readonly<{ kind: "not-found" }>
   | Readonly<{ kind: "forbidden" }>;
 
+export type ChannelMessageEditStorageResult =
+  | Readonly<{
+    kind: "updated";
+    message: ChannelMessageDocument;
+    reactions: readonly StoredMessageReaction[];
+  }>
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "forbidden" }>
+  | Readonly<{ kind: "not-editable" }>
+  | Readonly<{ kind: "conflict" }>;
+export type ChannelMessageEditResult = Exclude<ChannelMessageEditStorageResult, { kind: "updated" }> |
+  Readonly<{ kind: "updated"; message: ChannelMessage; reactions: readonly StoredMessageReaction[] }>;
+
 export type ChannelMessageStorage = Readonly<{
   initialize: () => Promise<void>;
   findForMember: (
@@ -33,6 +46,15 @@ export type ChannelMessageStorage = Readonly<{
     userId: string,
     message: ChannelMessageDocument
   ) => Promise<"created" | "channel-unavailable">;
+  editForMember: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    editedAt: Date
+  ) => Promise<ChannelMessageEditStorageResult>;
   deleteForMember: (
     workspaceId: string,
     channelId: string,
@@ -78,6 +100,15 @@ export type ChannelMessageRepository = Readonly<{
     userId: string,
     message: ChannelMessage
   ) => Promise<"created" | "channel-unavailable">;
+  editForMember: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    editedAt: Date
+  ) => Promise<ChannelMessageEditResult>;
   deleteForMember: ChannelMessageStorage["deleteForMember"];
   listReactionsForMember?: ChannelMessageStorage["listReactionsForMember"];
   toggleReactionForMember?: ChannelMessageStorage["toggleReactionForMember"];
@@ -104,6 +135,7 @@ const toChannelMessage = (document: ChannelMessageDocument): ChannelHistoryEntry
     senderId: document.senderId,
     text: document.text,
     createdAt: document.createdAt,
+    ...(document.editedAt !== undefined ? { editedAt: document.editedAt } : {}),
     ...(document.attachments && document.attachments.length > 0
       ? { attachments: document.attachments }
       : {})
@@ -116,6 +148,7 @@ const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => O
   senderId: message.senderId,
   text: message.text,
   createdAt: message.createdAt,
+  ...(message.editedAt !== undefined ? { editedAt: message.editedAt } : {}),
   type: "message",
   ...(message.attachments && message.attachments.length > 0
     ? { attachments: message.attachments }
@@ -141,6 +174,13 @@ export const createChannelMessageRepository = (storage: ChannelMessageStorage): 
   },
   createForMember: (workspaceId, channelId, userId, message) =>
     storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message)),
+  editForMember: async (...args) => {
+    const result = await storage.editForMember(...args);
+    if (result.kind !== "updated") return result;
+    const message = toChannelMessage(result.message);
+    if (!("senderId" in message)) throw new Error("An edited channel message is missing its sender.");
+    return Object.freeze({ ...result, message });
+  },
   deleteForMember: storage.deleteForMember,
   ...(storage.listReactionsForMember
     ? { listReactionsForMember: storage.listReactionsForMember }

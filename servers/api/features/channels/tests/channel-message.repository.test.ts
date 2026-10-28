@@ -25,6 +25,7 @@ void test("maps newest-first storage pages to chronological output with an ID cu
     initialize: () => Promise.resolve(),
     findForMember: () => Promise.resolve({ kind: "listed", messages: documents }),
     createForMember: () => Promise.resolve("created"),
+    editForMember: () => Promise.resolve({ kind: "not-found" }),
     deleteForMember: () => Promise.resolve({ kind: "not-found" })
   };
   const repository = createChannelMessageRepository(storage);
@@ -79,6 +80,7 @@ void test("pages through equal-timestamp messages without gaps or duplicates", a
       });
     },
     createForMember: () => Promise.resolve("created"),
+    editForMember: () => Promise.resolve({ kind: "not-found" }),
     deleteForMember: () => Promise.resolve({ kind: "not-found" })
   });
   const pages: string[][] = [];

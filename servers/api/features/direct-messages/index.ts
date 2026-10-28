@@ -12,6 +12,8 @@ export { createMongoDirectMessageStorage } from "./integrations/index.js";
 export { createDirectMessageRepository } from "./repositories/index.js";
 export type {
   DirectMessageOpenStorageResult,
+  DirectMessageEditResult,
+  DirectMessageEditStorageResult,
   DirectMessageRepository,
   DirectMessageStorage
 } from "./repositories/index.js";

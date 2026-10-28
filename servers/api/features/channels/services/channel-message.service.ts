@@ -9,7 +9,7 @@ import type { StoredMessageReaction } from "../../message-reactions/public/index
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
 import { isChannelStorageUnavailableError } from "../repositories/index.js";
-import type { ChannelMessageRepository } from "../repositories/index.js";
+import type { ChannelMessageEditResult, ChannelMessageRepository } from "../repositories/index.js";
 import { validateChannelMessageText } from "../domain/index.js";
 import {
   CHAT_ATTACHMENT_MAX_FILES,
@@ -46,6 +46,11 @@ export type SendChannelMessageResult =
   }>
   | Readonly<{ kind: "channel-unavailable" }>
   | Readonly<{ kind: "attachment-unavailable" }>
+  | Readonly<{ kind: "unavailable" }>;
+export type EditChannelMessageResult =
+  | Readonly<{ kind: "updated"; message: ChannelMessageWithSender }>
+  | Readonly<{ kind: "invalid"; error: "message_required" | "message_too_long" }>
+  | Exclude<ChannelMessageEditResult, { kind: "updated" }>
   | Readonly<{ kind: "unavailable" }>;
 
 export type ChannelMessageService = ReturnType<typeof createChannelMessageService>;
@@ -107,6 +112,52 @@ export const createChannelMessageService = ({
             reactions: reactionsByMessage.get(message.id) ?? Object.freeze([])
           });
         }))
+      });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  edit: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    senderProfile?: Omit<ChannelMessageSender, "id">
+  ): Promise<EditChannelMessageResult> => {
+    const validated = validateChannelMessageText(text);
+    if (!validated.ok) return Object.freeze({ kind: "invalid", error: validated.error });
+    const timestamp = now();
+    const editedAt = expectedEditedAt && timestamp.getTime() <= expectedEditedAt.getTime()
+      ? new Date(expectedEditedAt.getTime() + 1)
+      : timestamp;
+    try {
+      const result = await repository.editForMember(
+        workspaceId,
+        channelId,
+        userId,
+        messageId,
+        validated.text,
+        expectedEditedAt,
+        editedAt
+      );
+      if (result.kind !== "updated") return result;
+      const profile = senderProfile ?? (await findUsersByIds([userId]))
+        .find(({ id }) => id === userId);
+      const reactionsByMessage = await resolveReactions(result.reactions, findUsersByIds);
+      return Object.freeze({
+        kind: "updated",
+        message: Object.freeze({
+          ...result.message,
+          sender: Object.freeze({
+            id: userId,
+            name: profile?.name || "Former member",
+            image: profile?.image ?? null
+          }),
+          reactions: reactionsByMessage.get(messageId) ?? Object.freeze([])
+        })
       });
     } catch (error: unknown) {
       if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });

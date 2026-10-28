@@ -180,3 +180,74 @@ void test("accepts MongoDB's normalized representation of the channel message te
     `insertOne:${CHANNEL_MESSAGES_COLLECTION}`
   ]);
 });
+
+void test("edits channel messages only for members/authors and compares editedAt in the write filter", async () => {
+  const message = {
+    _id: "message-1",
+    channelId: "channel-1",
+    senderId: "author",
+    text: "original",
+    createdAt: new Date("2026-10-22T00:00:00.000Z")
+  };
+  const indexes = CHANNEL_MESSAGES_INDEXES.map((index) => ({
+    name: index.options.name,
+    key: Object.values(index.keys).includes("text") ? { _fts: "text", _ftsx: 1 } : index.keys,
+    ...(Object.values(index.keys).includes("text") ? { weights: { text: 1 } } : {}),
+    unique: index.options.unique
+  }));
+  const reactionIndexes = MESSAGE_REACTIONS_INDEXES.map((index) => ({
+    name: index.options.name,
+    key: index.keys,
+    unique: index.options.unique,
+    ...(index.options.name === "message_reaction_active_user_unique"
+      ? { partialFilterExpression: { active: true } }
+      : {})
+  }));
+  let writeFilter: unknown;
+  let writeUpdate: unknown;
+  const database = {
+    listCollections: ({ name }: Readonly<{ name: string }>) => ({
+      next: () => Promise.resolve({
+        name,
+        options: { validator: name === MESSAGE_REACTIONS_COLLECTION
+          ? MESSAGE_REACTIONS_COLLECTION_VALIDATOR
+          : CHANNEL_MESSAGES_COLLECTION_VALIDATOR }
+      })
+    }),
+    collection: (name: string) => ({
+      indexes: () => Promise.resolve(name === MESSAGE_REACTIONS_COLLECTION ? reactionIndexes : indexes),
+      findOne: (filter: Readonly<Record<string, unknown>>) => Promise.resolve(
+        name === CHANNELS_COLLECTION
+          ? { _id: "channel-1", workspaceId: "workspace-1" }
+          : name === CHANNEL_MEMBERSHIPS_COLLECTION
+            ? filter.userId === "author" ? { channelId: "channel-1", userId: "author" } : null
+            : message
+      ),
+      updateOne: (filter: unknown, update: unknown) => {
+        writeFilter = filter;
+        writeUpdate = update;
+        return Promise.resolve({ matchedCount: 1 });
+      },
+      aggregate: () => ({ toArray: () => Promise.resolve([]) })
+    })
+  } as unknown as MongoDatabase;
+  const storage = createMongoChannelMessageStorage(database, (operation) => operation({} as never));
+  const expectedEditedAt = new Date("2026-10-22T00:00:00.000Z");
+  const editedAt = new Date("2026-10-22T00:00:00.001Z");
+
+  assert.deepEqual(await storage.editForMember(
+    "workspace-1", "channel-1", "outsider", "message-1", "edited", null, editedAt
+  ), { kind: "not-found" });
+  assert.deepEqual(await storage.editForMember(
+    "workspace-1", "channel-1", "author", "message-1", "edited", expectedEditedAt, editedAt
+  ), { kind: "conflict" });
+  const edited = await storage.editForMember(
+    "workspace-1", "channel-1", "author", "message-1", "edited", null, editedAt
+  );
+  assert.equal(edited.kind, "updated");
+  assert.deepEqual((writeFilter as { $or: unknown }).$or, [
+    { editedAt: { $exists: false } },
+    { editedAt: null }
+  ]);
+  assert.deepEqual(writeUpdate, { $set: { text: "edited", editedAt } });
+});

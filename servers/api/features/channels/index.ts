@@ -30,7 +30,12 @@ export type {
   ChannelStorageUnavailableError,
   ChannelWriteTransaction
 } from "./repositories/index.js";
-export type { ChannelMessageRepository, ChannelMessageStorage } from "./repositories/index.js";
+export type {
+  ChannelMessageRepository,
+  ChannelMessageEditResult,
+  ChannelMessageEditStorageResult,
+  ChannelMessageStorage
+} from "./repositories/index.js";
 export { createMongoChannelStorage } from "./integrations/index.js";
 export { createMongoChannelMembershipCleanup } from "./integrations/index.js";
 export { createMongoChannelMessageStorage } from "./integrations/index.js";
@@ -42,7 +47,8 @@ export type {
   ChannelMessageService,
   ChannelMessagePageResult,
   ChannelMessageWithSender,
-  SendChannelMessageResult
+  SendChannelMessageResult,
+  EditChannelMessageResult
 } from "./services/index.js";
 export type {
   ChannelService,

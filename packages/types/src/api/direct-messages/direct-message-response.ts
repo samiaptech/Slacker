@@ -22,6 +22,7 @@ export type DirectMessageResponse = Readonly<{
   senderId: string;
   text: string;
   createdAt: string;
+  editedAt?: string | null;
   attachments?: readonly ChatAttachmentResponse[];
   reactions: readonly MessageReactionResponse[];
   sender: Readonly<{

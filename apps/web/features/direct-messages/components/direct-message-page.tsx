@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
 import { FileText, Paperclip, Send, X } from "lucide-react";
-import type { MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
+import type { DirectMessageResponse, MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
+import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "@/features/channels/public";
 import {
@@ -26,7 +27,8 @@ import {
   type MessageDeleteScope,
   type MessageWithDelivery,
   optimisticallyToggleMessageReaction,
-  requestMessageReaction
+  requestMessageReaction,
+  useMessageEdit
 } from "@/features/conversation-history/public";
 import { useMessageSearchJump } from "@/features/message-search/public";
 
@@ -64,6 +66,7 @@ type DirectMessagePageProps = Readonly<{ apiBaseUrl: string; conversationId: str
 
 export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessagePageProps): ReactElement => {
   const { activeWorkspace, currentUser } = useWorkspaceContext();
+  const router = useRouter();
   const realtime = useChannelRealtime();
   const [conversation, setConversation] = useState<ReturnType<typeof directConversationResponseSchema.parse>["conversation"] | null>(null);
   const [loadedConversationId, setLoadedConversationId] = useState<string | null>(null);
@@ -103,6 +106,31 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
   const typingIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const getEditableMessage = useCallback((messageId: string): DirectMessageView | undefined =>
+    messages.find((message) => message.id === messageId), [messages]);
+  const updateEditedMessage = useCallback((updated: DirectMessageView): void => {
+    setMessages((current) => current.map((message) =>
+      message.id === updated.id ? { ...message, ...updated } : message
+    ));
+  }, []);
+  const getEditEndpoint = useCallback((messageId: string): string =>
+    `/direct-messages/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+  [conversationId]);
+  const parseEditedMessage = useCallback((payload: unknown): DirectMessageView | null => {
+    const parsed = directMessageResponseSchema.safeParse(payload);
+    return parsed.success && parsed.data.conversationId === conversationId ? parsed.data : null;
+  }, [conversationId]);
+  const reloadMessages = useCallback((): void => setReloadToken((current) => current + 1), []);
+  const messageEdit = useMessageEdit({
+    apiBaseUrl,
+    workspaceId: activeWorkspace.id,
+    endpoint: getEditEndpoint,
+    getMessage: getEditableMessage,
+    updateMessage: updateEditedMessage,
+    parseResponse: parseEditedMessage,
+    reload: reloadMessages
+  });
+  const receiveRealtimeUpdate = messageEdit.receiveRealtimeUpdate;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,9 +155,13 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
         const failedResponse = !conversationResponse.ok
           ? conversationResponse
           : !messagesResponse.ok ? messagesResponse : null;
+        if (failedResponse?.status === 403 || failedResponse?.status === 404) {
+          router.replace("/");
+          return;
+        }
         if (failedResponse) throw new Error(failedResponse.status === 503
           ? "Direct-message storage is not initialized. Ask an administrator to run the direct-message setup."
-          : "This direct conversation is unavailable or you do not have access.");
+          : "This direct conversation could not be loaded. Please try again.");
         const [conversationBody, messagesBody] = await Promise.all([
           conversationResponse.json(),
           messagesResponse.json()
@@ -155,7 +187,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     };
     void load();
     return () => controller.abort();
-  }, [activeWorkspace.id, apiBaseUrl, conversationId, reloadToken]);
+  }, [activeWorkspace.id, apiBaseUrl, conversationId, reloadToken, router]);
 
   useEffect(() => {
     alreadyReadyRef.current = false;
@@ -176,6 +208,11 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       if (message.conversationId !== conversationId) return;
       shouldScrollRef.current = true;
       setMessages((current) => mergeIncomingMessages(current, [message]));
+    };
+    const onMessageUpdated = (message: DirectMessageResponse): void => {
+      const parsed = directMessageResponseSchema.safeParse(message);
+      if (!parsed.success || parsed.data.conversationId !== conversationId) return;
+      receiveRealtimeUpdate(parsed.data);
     };
     const onMessageDeleted = (change: Readonly<{ conversationId: string; messageId: string }>): void => {
       if (change.conversationId !== conversationId) return;
@@ -210,6 +247,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     };
     socket.on("direct-message:ready", onReady);
     socket.on("direct-message:new", onMessage);
+    socket.on("direct-message:updated", onMessageUpdated);
     socket.on("direct-message:deleted", onMessageDeleted);
     socket.on("direct-message:reactions", onMessageReactions);
     socket.on("direct-message:typing", onTyping);
@@ -218,6 +256,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     return () => {
       socket.off("direct-message:ready", onReady);
       socket.off("direct-message:new", onMessage);
+      socket.off("direct-message:updated", onMessageUpdated);
       socket.off("direct-message:deleted", onMessageDeleted);
       socket.off("direct-message:reactions", onMessageReactions);
       socket.off("direct-message:typing", onTyping);
@@ -228,7 +267,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       typingTimeoutRef.current = null;
       typingIndicatorTimeoutRef.current = null;
     };
-  }, [activeWorkspace.id, conversationId, currentUser.id, realtime.socket, realtime.workspaceReady]);
+  }, [activeWorkspace.id, conversationId, currentUser.id, realtime.socket, realtime.workspaceReady, receiveRealtimeUpdate]);
 
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
@@ -546,7 +585,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                 {realtime.status === "connected" ? "Live updates" : "Reconnecting to live chat…"}
               </p>
             </header>
-            {messageActionError ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError}</p> : null}
+            {messageActionError || messageEdit.error ? <p className="shrink-0 px-6 pt-2 text-sm text-destructive" role="alert">{messageActionError ?? messageEdit.error}</p> : null}
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-2 sm:px-8" ref={scrollContainerRef}>
               {nextCursor ? (
                 <div className="mb-3 text-center">
@@ -570,15 +609,23 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                       downloadingAttachmentId={downloadingAttachmentId}
                       isDownloadBusy={downloadingAttachmentId !== null}
                       canDeleteForEveryone={message.senderId === currentUser.id || activeWorkspace.role === "admin"}
+                      canEdit={message.senderId === currentUser.id && Boolean(message.text)}
                       isDeleting={deletingMessageId !== null}
+                      isEditing={messageEdit.editingMessageId === message.id}
+                      isSavingEdit={messageEdit.savingMessageId === message.id}
                       isReactionPending={pendingReactionMessageIds.has(message.id)}
                       currentUserId={currentUser.id}
                       currentUserName={currentUser.name || currentUser.email}
+                      editDraft={messageEdit.editingMessageId === message.id ? messageEdit.draft : message.text}
                       message={message}
-                      onDownloadAttachment={downloadAttachment}
-                      loadImagePreview={loadImagePreview}
+                      onCancelEdit={messageEdit.cancelEdit}
                       onDelete={(scope) => { void deleteMessage(message.id, scope); }}
+                      onDownloadAttachment={downloadAttachment}
+                      onEdit={() => { messageEdit.beginEdit(message); }}
+                      onEditChange={messageEdit.setDraft}
+                      onSaveEdit={() => { void messageEdit.saveEdit(message.id); }}
                       onToggleReaction={(emoji) => { void toggleReaction(message.id, emoji); }}
+                      loadImagePreview={loadImagePreview}
                       startsNewDay={startsNewDay}
                     />
                   ))}

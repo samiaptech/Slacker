@@ -6,6 +6,7 @@ import {
   MessageActions,
   MessageAttachmentList,
   MessageDeliveryIndicator,
+  MessageInlineEditor,
   MessageReactions,
   type MessageAttachment,
   type MessageDeliveryState,
@@ -25,13 +26,21 @@ type DirectMessageItemProps = Readonly<{
   isDownloadBusy: boolean;
   downloadingAttachmentId: string | null;
   canDeleteForEveryone: boolean;
+  canEdit: boolean;
   isDeleting: boolean;
+  isEditing: boolean;
+  isSavingEdit: boolean;
   isReactionPending: boolean;
   currentUserId: string;
   currentUserName: string;
+  editDraft: string;
   onDownloadAttachment: (attachment: DirectMessageAttachment) => void;
   loadImagePreview: (attachment: MessageAttachment, signal: AbortSignal) => Promise<string>;
   onDelete: (scope: MessageDeleteScope) => void;
+  onEdit: () => void;
+  onEditChange: (value: string) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
   onToggleReaction: (emoji: MessageReactionEmoji) => void;
 }>;
 
@@ -60,11 +69,19 @@ const DirectMessageItemView = ({
   onDownloadAttachment,
   loadImagePreview,
   canDeleteForEveryone,
+  canEdit,
   isDeleting,
+  isEditing,
+  isSavingEdit,
   isReactionPending,
   currentUserId,
   currentUserName,
+  editDraft,
   onDelete,
+  onEdit,
+  onEditChange,
+  onCancelEdit,
+  onSaveEdit,
   onToggleReaction
 }: DirectMessageItemProps): ReactElement => (
   <>
@@ -85,10 +102,28 @@ const DirectMessageItemView = ({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
           <time className="text-xs text-muted-foreground" dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
+          {message.editedAt ? <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Edited</span> : null}
           <MessageDeliveryIndicator onRetry={onRetry} retryDisabled={retryDisabled} state={deliveryState} />
-          {!deliveryState ? <MessageActions canDeleteForEveryone={canDeleteForEveryone} disabled={isDeleting} onDelete={onDelete} /> : null}
+          {!deliveryState ? (
+            <MessageActions
+              canDeleteForEveryone={canDeleteForEveryone}
+              canEdit={canEdit}
+              disabled={isDeleting || isEditing}
+              onDelete={onDelete}
+              onEdit={onEdit}
+            />
+          ) : null}
         </div>
-        {message.text ? (
+        {isEditing ? (
+          <MessageInlineEditor
+            isSaving={isSavingEdit}
+            onCancel={onCancelEdit}
+            onChange={onEditChange}
+            onSave={onSaveEdit}
+            originalText={message.text}
+            value={editDraft}
+          />
+        ) : message.text ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <p className="w-fit max-w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
             {!deliveryState ? <MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /> : null}

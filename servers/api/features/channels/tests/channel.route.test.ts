@@ -88,10 +88,12 @@ const startApi = async (
     send: () => Promise.resolve({ kind: "channel-unavailable" }),
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
     delete: () => Promise.resolve({ kind: "not-found" }),
-    toggleReaction: () => Promise.resolve({ kind: "not-found" })
+    toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+    edit: () => Promise.resolve({ kind: "not-found" })
   },
   attachmentStorage?: ChatAttachmentIntegration,
-  updateChannel?: ChannelService["update"]
+  updateChannel?: ChannelService["update"],
+  realtime?: Parameters<typeof createApp>[0]["channelRealtime"]
 ) => {
   const workspaceFixture = createWorkspaceServiceFixture();
   workspaceFixture.seed("workspace-configured", [memberIdentity.id, otherMemberIdentity.id]);
@@ -103,6 +105,7 @@ const startApi = async (
     authentication,
     workspaceService: workspaceFixture.service,
     channelMessageService: messageService,
+    ...(realtime ? { channelRealtime: realtime } : {}),
     ...(attachmentStorage ? { attachmentStorage } : {}),
     channelService: {
       create,
@@ -169,7 +172,8 @@ const startApi = async (
             send: () => Promise.resolve({ kind: "channel-unavailable" }),
             getAttachment: () => Promise.resolve({ kind: "not-found" }),
             delete: () => Promise.resolve({ kind: "not-found" }),
-            toggleReaction: () => Promise.resolve({ kind: "not-found" })
+            toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+            edit: () => Promise.resolve({ kind: "not-found" })
           };
           const { server, url } = await startApi(createTestChannel, undefined, undefined, undefined, undefined,
             undefined, undefined, undefined, undefined, messageService);
@@ -646,7 +650,8 @@ void test("lists and sends channel messages with current workspace authorization
     },
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
     delete: () => Promise.resolve({ kind: "not-found" }),
-    toggleReaction: () => Promise.resolve({ kind: "not-found" })
+    toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+    edit: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -704,7 +709,8 @@ void test("lists and sends channel messages with current workspace authorization
           : { kind: "not-found" as const }
       ),
       delete: () => Promise.resolve({ kind: "not-found" }),
-      toggleReaction: () => Promise.resolve({ kind: "not-found" })
+      toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+      edit: () => Promise.resolve({ kind: "not-found" })
     };
     const attachmentStorage: ChatAttachmentIntegration = {
       upload: () => Promise.resolve(attachment),
@@ -821,7 +827,8 @@ void test("exposes the message deletion contract and derives admin override from
       }
       return Promise.resolve(args[5] ? { kind: "deleted" } : { kind: "forbidden" });
     },
-    toggleReaction: () => Promise.resolve({ kind: "not-found" })
+    toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+    edit: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -889,7 +896,8 @@ void test("toggles channel reactions with authenticated identity and rejects uns
     toggleReaction: (...args) => {
       calls.push(args);
       return Promise.resolve({ kind: "updated", messageId: "message-1", reactions });
-    }
+    },
+    edit: () => Promise.resolve({ kind: "not-found" })
   };
   const { server, url } = await startApi(
     createTestChannel,
@@ -933,4 +941,86 @@ void test("toggles channel reactions with authenticated identity and rejects uns
   const outsideWorkspace = await request("outside", "👍");
   assert.equal(outsideWorkspace.status, 403);
   assert.equal(calls.length, 1);
+});
+
+void test("edits channel messages through the authenticated route and returns conflicts distinctly", async (context) => {
+  const calls: unknown[][] = [];
+  const updates: unknown[][] = [];
+  const realtime: NonNullable<Parameters<typeof createApp>[0]["channelRealtime"]> = {
+    publishMessage: () => undefined,
+    publishMessageUpdated: (...args) => { updates.push(args); },
+    publishMessageDeleted: () => undefined,
+    publishMessageReactions: () => undefined,
+    publishChannelListChanged: () => undefined,
+    publishWorkspaceMembersChanged: () => undefined,
+    publishMembersChanged: () => undefined,
+    revokeChannelAccess: () => undefined,
+    revokeWorkspaceAccess: () => undefined
+  };
+  const messageService: ChannelMessageService = {
+    list: () => Promise.resolve({ kind: "channel-unavailable" }),
+    send: () => Promise.resolve({ kind: "channel-unavailable" }),
+    getAttachment: () => Promise.resolve({ kind: "not-found" }),
+    delete: () => Promise.resolve({ kind: "not-found" }),
+    toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+    edit: (...args) => {
+      calls.push(args);
+      if (args[4] === "stale") return Promise.resolve({ kind: "conflict" });
+      if (args[4].trim().length === 0) return Promise.resolve({ kind: "invalid", error: "message_required" });
+      return Promise.resolve({
+        kind: "updated",
+        message: {
+          ...channelMessage,
+          text: args[4],
+          editedAt: new Date("2026-10-28T12:00:00.000Z")
+        }
+      });
+    }
+  };
+  const { server, url } = await startApi(
+    createTestChannel,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    messageService,
+    undefined,
+    undefined,
+    realtime
+  );
+  context.after(async () => server.stop());
+  const endpoint = `${url}/channel-1/messages/message-1`;
+  const patch = (text: string, expectedEditedAt: string | null = null) => fetch(endpoint, {
+    method: "PATCH",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": "member"
+    },
+    body: JSON.stringify({ text, expectedEditedAt })
+  });
+
+  const updated = await patch("Edited message");
+  assert.equal(updated.status, 200);
+  assert.equal(updated.headers.get("cache-control"), "no-store");
+  assert.equal((await updated.json() as { text: string; editedAt: string }).text, "Edited message");
+  assert.equal(updates.length, 1);
+  assert.equal((updates[0]?.[2] as { text: string }).text, "Edited message");
+  assert.deepEqual(calls[0], [
+    "workspace-configured",
+    "channel-1",
+    memberIdentity.id,
+    "message-1",
+    "Edited message",
+    null,
+    { name: memberIdentity.name, image: null }
+  ]);
+  assert.equal((await patch("stale", "not-a-date")).status, 400);
+  assert.equal((await patch("stale")).status, 409);
+  assert.equal((await patch(" ")).status, 400);
+  assert.equal(updates.length, 1);
 });

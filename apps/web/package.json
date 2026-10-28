@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "pnpm --filter @workspace/types run build && pnpm --filter @workspace/ui run build && next build",
     "start": "next start",
-    "test": "tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/security-policy.test.ts tests/workspace-response.test.ts tests/channels.test.ts features/channels/components/channel-message-request.test.ts tests/channel-submission.test.ts tests/conversation-history.test.ts tests/message-search.test.ts features/notifications/notification-load-state.test.ts tests/notifications.test.ts",
+    "test": "pnpm --filter @workspace/types run build && tsx --test tests/integration/home-page.test.tsx tests/environment.test.ts tests/security-policy.test.ts tests/workspace-response.test.ts tests/channels.test.ts features/channels/components/channel-message-request.test.ts tests/channel-submission.test.ts tests/conversation-history.test.ts tests/message-search.test.ts features/notifications/notification-load-state.test.ts tests/notifications.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

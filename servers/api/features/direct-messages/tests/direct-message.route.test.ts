@@ -39,6 +39,27 @@ void test("uses authenticated workspace role for DM global deletion while requir
     findForMember: () => Promise.resolve(null),
     listMessagesForMember: () => Promise.resolve(null),
     createMessageForMember: () => Promise.resolve(false),
+    editMessageForMember: (
+      workspaceId,
+      conversationId,
+      userId,
+      messageId,
+      text,
+      _expectedEditedAt,
+      editedAt
+    ) => Promise.resolve({
+      kind: "updated" as const,
+      message: {
+        _id: messageId,
+        workspaceId,
+        conversationId,
+        senderId: userId,
+        text,
+        createdAt: now,
+        editedAt
+      },
+      reactions: []
+    }),
     deleteMessageForMember: (_workspaceId, _conversationId, _userId, _messageId, _scope, isWorkspaceAdmin) => {
       requestedRoles.push(isWorkspaceAdmin);
       return Promise.resolve(isWorkspaceAdmin
@@ -88,7 +109,8 @@ void test("uses authenticated workspace role for DM global deletion while requir
     send: () => Promise.resolve({ kind: "channel-unavailable" }),
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
     delete: () => Promise.resolve({ kind: "not-found" }),
-    toggleReaction: () => Promise.resolve({ kind: "not-found" })
+    toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+    edit: () => Promise.resolve({ kind: "not-found" })
   };
   const channelService: Parameters<typeof createApp>[0]["channelService"] = {
     create: () => Promise.resolve({ kind: "unavailable" }),
@@ -102,6 +124,14 @@ void test("uses authenticated workspace role for DM global deletion while requir
     inviteMember: () => Promise.resolve({ kind: "channel-unavailable" }),
     removeMember: () => Promise.resolve({ kind: "channel-unavailable" })
   };
+  const updatedMessages: unknown[] = [];
+  const directMessageRealtime: NonNullable<Parameters<typeof createApp>[0]["directMessageRealtime"]> = {
+    publishDirectMessage: () => undefined,
+    publishMessageUpdated: (_workspaceId, _conversationId, message) => { updatedMessages.push(message); },
+    publishMessageDeleted: () => undefined,
+    publishMessageReactions: () => undefined,
+    publishConversationChanged: () => undefined
+  };
   const app = createApp({
     config,
     logger,
@@ -111,7 +141,8 @@ void test("uses authenticated workspace role for DM global deletion while requir
     workspaceService: workspaceFixture.service,
     channelService,
     channelMessageService,
-    directMessageService
+    directMessageService,
+    directMessageRealtime
   });
   const server = createServer({ app, config, logger });
   await server.start();
@@ -163,4 +194,22 @@ void test("uses authenticated workspace role for DM global deletion while requir
   assert.equal((await toggleReaction(admin.id, "👍")).status, 404);
   assert.equal((await toggleReaction(member.id, "🧨")).status, 400);
   assert.equal(reactionCalls.length, 2);
+
+  const edited = await fetch(endpoint, {
+    method: "PATCH",
+    headers: {
+      "x-workspace-id": "workspace-1",
+      "x-test-identity": member.id,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ text: "Edited DM", expectedEditedAt: null })
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.headers.get("cache-control"), "no-store");
+  const editedMessage = await edited.json() as { text: string; editedAt: string; senderId: string };
+  assert.equal(editedMessage.text, "Edited DM");
+  assert.equal(editedMessage.editedAt, now.toISOString());
+  assert.equal(editedMessage.senderId, member.id);
+  assert.equal(updatedMessages.length, 1);
+  assert.deepEqual(updatedMessages[0], editedMessage);
 });

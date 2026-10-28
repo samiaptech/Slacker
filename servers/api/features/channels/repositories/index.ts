@@ -17,6 +17,8 @@ export type {
 export { createChannelMessageRepository } from "./channel-message.repository.js";
 export type {
   ChannelMessageRepository,
+  ChannelMessageEditResult,
+  ChannelMessageEditStorageResult,
   ChannelMessageStorage,
   ChannelMessageStorageResult
 } from "./channel-message.repository.js";

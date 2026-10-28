@@ -21,6 +21,7 @@ type ChannelSocket = Socket<
 
 export type ChannelRealtimePublisher = Readonly<{
   publishMessage: (workspaceId: string, channelId: string, message: ChannelMessageResponse) => void;
+  publishMessageUpdated: (workspaceId: string, channelId: string, message: ChannelMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, channelId: string, messageId: string) => void;
   publishMessageReactions: (
     workspaceId: string,
@@ -259,6 +260,9 @@ export const createChannelRealtime = ({
   return Object.freeze({
     publishMessage: (workspaceId, channelId, message) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:message:new", message);
+    },
+    publishMessageUpdated: (workspaceId, channelId, message) => {
+      io.to(channelRoom(workspaceId, channelId)).emit("channel:message:updated", message);
     },
     publishMessageDeleted: (workspaceId, channelId, messageId) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:message:deleted", { channelId, messageId });

@@ -43,7 +43,8 @@ const channelMessageService: Parameters<typeof createApp>[0]["channelMessageServ
   send: () => Promise.resolve({ kind: "channel-unavailable" }),
   getAttachment: () => Promise.resolve({ kind: "not-found" }),
   delete: () => Promise.resolve({ kind: "not-found" }),
-  toggleReaction: () => Promise.resolve({ kind: "not-found" })
+  toggleReaction: () => Promise.resolve({ kind: "not-found" }),
+  edit: () => Promise.resolve({ kind: "not-found" })
 };
 
 const startApi = async (
@@ -325,6 +326,7 @@ void test("allows a member to leave but denies removing another member and inval
   const notifications: string[] = [];
   const realtime: ChannelRealtimePublisher = {
     publishMessage: () => undefined,
+    publishMessageUpdated: () => undefined,
     publishMessageDeleted: () => undefined,
     publishMessageReactions: () => undefined,
     publishChannelListChanged: () => undefined,

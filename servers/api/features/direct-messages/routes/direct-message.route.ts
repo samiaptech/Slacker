@@ -14,6 +14,7 @@ import {
   createAuthorizeDirectMessageUploadController,
   createDownloadDirectMessageAttachmentController,
   createDeleteDirectMessageController,
+  createEditDirectMessageController,
   createToggleDirectMessageReactionController
 } from "../controllers/index.js";
 import type { DirectMessageService } from "../services/index.js";
@@ -88,6 +89,10 @@ export const createDirectMessageRoutes = (dependencies: DirectMessageRouteDepend
   router.delete(
     "/direct-messages/:conversationId/messages/:messageId",
     createDeleteDirectMessageController(controllerDependencies)
+  );
+  router.patch(
+    "/direct-messages/:conversationId/messages/:messageId",
+    createEditDirectMessageController(controllerDependencies)
   );
   router.post(
     "/direct-messages/:conversationId/messages/:messageId/reactions",

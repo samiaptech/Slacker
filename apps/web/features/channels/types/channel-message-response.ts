@@ -23,6 +23,7 @@ const channelMessageBaseSchema = z.object({
   senderId: z.string().min(1),
   text: z.string().refine((text) => Array.from(text).length <= 4_000),
   createdAt: z.iso.datetime(),
+  editedAt: z.string().datetime().nullable().optional(),
   attachments: z.array(attachmentSchema).max(5).readonly().optional(),
   reactions: z.array(messageReactionSchema).readonly().optional(),
   sender: z.object({
@@ -33,7 +34,7 @@ const channelMessageBaseSchema = z.object({
 }).strict();
 
 const channelMessageSchema = channelMessageBaseSchema.transform((message): ChannelMessageResponse => {
-  return { ...message, type: "message", attachments: message.attachments ?? [], reactions: message.reactions ?? [] };
+  return { ...message, type: "message", attachments: message.attachments ?? [], reactions: message.reactions ?? [], editedAt: message.editedAt ?? null };
 }) satisfies z.ZodType<ChannelMessageResponse>;
 
 const channelSystemEventSchema = z.object({

@@ -158,6 +158,11 @@ void test("authenticates sockets and scopes live channel events to workspace mem
     realtime.publishMessage("workspace-1", "channel-1", message);
     assert.deepEqual(await receivedMessage, message);
 
+    const updatedMessage = { ...message, text: "Edited from the server", editedAt: "2026-10-16T00:01:00.000Z" };
+    const receivedUpdate = new Promise((resolve) => bob.once("channel:message:updated", resolve));
+    realtime.publishMessageUpdated("workspace-1", "channel-1", updatedMessage);
+    assert.deepEqual(await receivedUpdate, updatedMessage);
+
     const receivedDeletion = new Promise((resolve) => bob.once("channel:message:deleted", resolve));
     realtime.publishMessageDeleted("workspace-1", "channel-1", "message-1");
     assert.deepEqual(await receivedDeletion, { channelId: "channel-1", messageId: "message-1" });
@@ -194,10 +199,14 @@ void test("authenticates sockets and scopes live channel events to workspace mem
     privateViewer.emit("channel:subscribe", "channel-1");
     assert.equal((await privateChannelDenied).event, "channel:subscribe");
     let privateMessageReceived = false;
+    let privateUpdateReceived = false;
     privateViewer.once("channel:message:new", () => { privateMessageReceived = true; });
+    privateViewer.once("channel:message:updated", () => { privateUpdateReceived = true; });
     realtime.publishMessage("workspace-1", "channel-1", message);
+    realtime.publishMessageUpdated("workspace-1", "channel-1", updatedMessage);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(privateMessageReceived, false);
+    assert.equal(privateUpdateReceived, false);
 
     const workspaceRevoked = new Promise((resolve) => alice.once("workspace:access:revoked", resolve));
     realtime.revokeWorkspaceAccess("workspace-1", "alice");

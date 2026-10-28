@@ -9,7 +9,7 @@ import {
 } from "../domain/index.js";
 import type { MessageReactionEmoji, MessageReactionResponse } from "@workspace/types";
 import type { StoredMessageReaction } from "../../message-reactions/public/index.js";
-import type { DirectMessageRepository } from "../repositories/index.js";
+import type { DirectMessageEditResult, DirectMessageRepository } from "../repositories/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { ChatAttachmentIntegration, ChatAttachmentUpload } from "../../../integrations/index.js";
 import {
@@ -23,6 +23,11 @@ export type DirectMessageWithSender = DirectMessage & Readonly<{
   sender: DirectParticipant;
   reactions: readonly MessageReactionResponse[];
 }>;
+export type EditDirectMessageResult =
+  | Readonly<{ kind: "updated"; message: DirectMessageWithSender }>
+  | Readonly<{ kind: "invalid"; error: "message_required" | "message_too_long" }>
+  | Exclude<DirectMessageEditResult, { kind: "updated" }>
+  | Readonly<{ kind: "unavailable" }>;
 
 export type DirectMessageService = ReturnType<typeof createDirectMessageService>;
 
@@ -137,6 +142,52 @@ export const createDirectMessageService = ({
         : Object.freeze({ kind: "deleted" as const });
     } catch (error: unknown) {
       if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });
+      throw error;
+    }
+  },
+  editMessage: async (
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    text: string,
+    expectedEditedAt: Date | null,
+    senderProfile?: Omit<DirectParticipant, "id">
+  ): Promise<EditDirectMessageResult> => {
+    const validated = validateDirectMessageText(text);
+    if (!validated.ok) return Object.freeze({ kind: "invalid", error: validated.error });
+    const timestamp = now();
+    const editedAt = expectedEditedAt && timestamp.getTime() <= expectedEditedAt.getTime()
+      ? new Date(expectedEditedAt.getTime() + 1)
+      : timestamp;
+    try {
+      const result = await repository.editMessageForMember(
+        workspaceId,
+        conversationId,
+        userId,
+        messageId,
+        validated.text,
+        expectedEditedAt,
+        editedAt
+      );
+      if (result.kind !== "updated") return result;
+      const profile = senderProfile ?? (await findUsersByIds([userId]))
+        .find(({ id }) => id === userId);
+      const reactionsByMessage = await resolveReactions(result.reactions, findUsersByIds);
+      return Object.freeze({
+        kind: "updated",
+        message: Object.freeze({
+          ...result.message,
+          sender: Object.freeze({
+            id: userId,
+            name: profile?.name || "Former member",
+            image: profile?.image ?? null
+          }),
+          reactions: reactionsByMessage.get(messageId) ?? Object.freeze([])
+        })
+      });
+    } catch (error: unknown) {
+      if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" });
       throw error;
     }
   },

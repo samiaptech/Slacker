@@ -17,6 +17,8 @@ export const ERROR_CODES = Object.freeze({
   chatAttachmentStorageUnavailable: "chat_attachment_storage_unavailable",
   messageDeleteForbidden: "message_delete_forbidden",
   messageDeleteCleanupFailed: "message_delete_cleanup_failed",
+  messageEditForbidden: "message_edit_forbidden",
+  messageEditConflict: "message_edit_conflict",
   messageSearchUnavailable: "message_search_unavailable",
   rateLimited: "rate_limited",
   apiRateLimited: "api_rate_limited",

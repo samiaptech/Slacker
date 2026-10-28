@@ -44,6 +44,7 @@ const createService = (
       calls.push({ operation: "send", channelId, userId, record });
       return Promise.resolve("created" as const);
     },
+    editForMember: () => Promise.resolve({ kind: "not-found" as const }),
     deleteForMember: () => Promise.resolve({ kind: "not-found" as const }),
     ...overrides
   };
@@ -243,6 +244,65 @@ void test("keeps unavailable storage explicit instead of reporting a successful 
     };
     const storageError = Object.assign(new Error("database unavailable"), {
       kind: "channel-storage-unavailable" as const
+    });
+
+    void test("edits only valid text with a monotonic editedAt and preserves sender and reaction metadata", async () => {
+      const expectedEditedAt = new Date("2026-10-15T12:00:00.000Z");
+      const storedMessage: ChannelMessage = Object.freeze({
+        ...message,
+        text: "Updated channel text",
+        editedAt: new Date("2026-10-15T12:00:00.001Z")
+      });
+      let editCall: readonly unknown[] | undefined;
+      const { service } = createService({
+        editForMember: (...args) => {
+          editCall = args;
+          return Promise.resolve({ kind: "updated", message: storedMessage, reactions: [] });
+        }
+      });
+
+      const result = await service.edit(
+        "workspace-1", "channel-1", "user-1", "message-1", "Updated channel text", expectedEditedAt
+      );
+
+      assert.equal(result.kind, "updated");
+      assert.equal(result.message.text, "Updated channel text");
+      assert.equal(result.message.editedAt?.toISOString(), "2026-10-15T12:00:00.001Z");
+      assert.deepEqual(result.message.sender, {
+        id: "user-1",
+        name: "Channel Member",
+        image: "https://example.test/avatar.png"
+      });
+      assert.deepEqual(result.message.reactions, []);
+      assert.deepEqual(editCall, [
+        "workspace-1",
+        "channel-1",
+        "user-1",
+        "message-1",
+        "Updated channel text",
+        expectedEditedAt,
+        new Date("2026-10-15T12:00:00.001Z")
+      ]);
+    });
+
+    void test("rejects blank and oversized edits before calling storage", async () => {
+      let editCount = 0;
+      const { service } = createService({
+        editForMember: () => {
+          editCount += 1;
+          return Promise.resolve({ kind: "not-found" });
+        }
+      });
+
+      assert.deepEqual(await service.edit("workspace-1", "channel-1", "user-1", "message-1", " \t ", null), {
+        kind: "invalid",
+        error: "message_required"
+      });
+      assert.deepEqual(await service.edit("workspace-1", "channel-1", "user-1", "message-1", "🙂".repeat(4001), null), {
+        kind: "invalid",
+        error: "message_too_long"
+      });
+      assert.equal(editCount, 0);
     });
     const failed = createService({
       createForMember: () => Promise.reject(storageError)

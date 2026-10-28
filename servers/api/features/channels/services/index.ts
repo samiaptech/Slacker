@@ -18,5 +18,6 @@ export type {
   ChannelMessageService,
   ChannelMessageSender,
   ChannelMessageWithSender,
-  SendChannelMessageResult
+  SendChannelMessageResult,
+  EditChannelMessageResult
 } from "./channel-message.service.js";

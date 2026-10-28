@@ -25,6 +25,8 @@ export const WorkspaceLeaveDialog = ({
     setErrorMessage(null);
     try {
       await leaveWorkspace();
+      setIsLeaving(false);
+      onOpenChange(false);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "You could not leave this workspace.");
       setIsLeaving(false);

@@ -21,6 +21,7 @@ export type DirectMessage = Readonly<{
   senderId: string;
   text: string;
   createdAt: Date;
+  editedAt?: Date | null;
   attachments?: readonly ChatAttachmentRecord[];
 }>;
 

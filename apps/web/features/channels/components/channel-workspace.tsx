@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -81,6 +81,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const [isLoadingMembers, setIsLoadingMembers] = useState(true);
   const [membersErrorMessage, setMembersErrorMessage] = useState<string | null>(null);
   const [membersReloadToken, setMembersReloadToken] = useState(0);
+  const pendingWorkspaceLanding = useRef<string | null>(null);
   const [directConversations, setDirectConversations] = useState<readonly DirectConversationView[]>([]);
   const [directMessagesError, setDirectMessagesError] = useState<string | null>(null);
   const [directMessagesLoading, setDirectMessagesLoading] = useState(true);
@@ -196,6 +197,13 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
         }
         setChannelList(parsed.data.channels);
         setNextCursor(parsed.data.nextCursor);
+        if (pendingWorkspaceLanding.current === activeWorkspace.id) {
+          const landingChannel = parsed.data.channels.find(
+            (channel) => channel.name.trim().toLocaleLowerCase() === "general"
+          ) ?? parsed.data.channels[0];
+          pendingWorkspaceLanding.current = null;
+          if (landingChannel) router.replace(`/channels/${encodeURIComponent(landingChannel.id)}` as Route);
+        }
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setErrorMessage("Your channels could not be loaded. Check your connection and try again.");
@@ -205,7 +213,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
     };
     void loadChannels();
     return () => controller.abort();
-  }, [activeWorkspace.id, apiBaseUrl, reloadToken, scope]);
+  }, [activeWorkspace.id, apiBaseUrl, reloadToken, router, scope]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -376,6 +384,15 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
     }
   };
 
+  const switchWorkspace = (workspaceId: string): void => {
+    if (workspaceId === activeWorkspace.id) return;
+    pendingWorkspaceLanding.current = workspaceId;
+    setScope("joined");
+    selectWorkspace(workspaceId);
+    setIsMobileSidebarOpen(false);
+    router.replace("/");
+  };
+
   const openNotification = (notification: NotificationResponse): boolean => {
     if (!workspaces.some(({ id }) => id === notification.workspaceId)) return false;
     if (notification.workspaceId !== activeWorkspace.id) selectWorkspace(notification.workspaceId);
@@ -406,7 +423,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                     aria-current={workspace.id === activeWorkspace.id ? "true" : undefined}
                     aria-label={`Switch to ${workspace.name}`}
                     className={workspace.id === activeWorkspace.id ? "workspace-rail-workspace is-active" : "workspace-rail-workspace"}
-                    onClick={() => selectWorkspace(workspace.id)}
+                    onClick={() => switchWorkspace(workspace.id)}
                     type="button"
                     variant="ghost"
                   >
@@ -448,7 +465,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-60">
               {workspaces.map((workspace) => (
-                <DropdownMenuItem key={workspace.id} onSelect={() => selectWorkspace(workspace.id)}>
+                <DropdownMenuItem key={workspace.id} onSelect={() => switchWorkspace(workspace.id)}>
                   {workspace.name}{workspace.id === activeWorkspace.id ? " · Current" : ""}
                 </DropdownMenuItem>
               ))}

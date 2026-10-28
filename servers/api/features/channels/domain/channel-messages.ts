@@ -10,6 +10,7 @@ export type ChannelMessage = Readonly<{
   senderId: string;
   text: string;
   createdAt: Date;
+  editedAt?: Date | null;
   attachments?: readonly ChatAttachmentRecord[];
   type?: "message";
 }>;

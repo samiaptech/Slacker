@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { messageSearchResponseSchema, type MessageSearchResponseView } from "./types/message-search-response";
 
+const MESSAGE_SEARCH_DEBOUNCE_MS = 300;
+
 type UseMessageSearchOptions = Readonly<{
   apiBaseUrl: string;
   workspaceId: string;
@@ -42,6 +44,7 @@ export const useMessageSearch = ({ apiBaseUrl, workspaceId, open, query }: UseMe
             body: JSON.stringify({ query: searchQuery, page }),
             signal: controller.signal
           });
+          if (controller.signal.aborted) return;
           if (!response.ok) {
             setError(response.status === 429
               ? "You’re searching too quickly. Wait a moment and try again."
@@ -50,7 +53,9 @@ export const useMessageSearch = ({ apiBaseUrl, workspaceId, open, query }: UseMe
                 : "Messages couldn’t be searched. Please try again.");
             return;
           }
-          const parsed = messageSearchResponseSchema.safeParse(await response.json());
+          const payload: unknown = await response.json();
+          if (controller.signal.aborted) return;
+          const parsed = messageSearchResponseSchema.safeParse(payload);
           if (!parsed.success) {
             setError("The server returned invalid search results.");
             return;
@@ -74,7 +79,7 @@ export const useMessageSearch = ({ apiBaseUrl, workspaceId, open, query }: UseMe
         }
       };
       void search();
-    }, 250);
+    }, MESSAGE_SEARCH_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(debounce);
       if (requestTimeout !== undefined) window.clearTimeout(requestTimeout);

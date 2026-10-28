@@ -15,6 +15,8 @@ export type ApiErrorCode =
   | "chat_attachment_storage_unavailable"
   | "message_delete_forbidden"
   | "message_delete_cleanup_failed"
+  | "message_edit_forbidden"
+  | "message_edit_conflict"
   | "message_search_unavailable"
   | "rate_limited"
   | "api_rate_limited"

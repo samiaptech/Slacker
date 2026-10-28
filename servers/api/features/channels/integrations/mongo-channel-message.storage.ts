@@ -190,6 +190,52 @@ export const createMongoChannelMessageStorage = (
         return "created";
       });
     },
+    editForMember: async (workspaceId, channelId, userId, messageId, text, expectedEditedAt, editedAt) => {
+      await ensureReady();
+      return runTransaction(async (session) => {
+        const channel = await channels.findOne({ _id: channelId, workspaceId }, { session });
+        const membership = await memberships.findOne({ channelId, userId }, { session });
+        if (!channel || !membership) return Object.freeze({ kind: "not-found" as const });
+        const message = await messages.findOne({
+          _id: messageId,
+          channelId,
+          senderId: { $exists: true },
+          hiddenForUserIds: { $nin: [userId] }
+        }, { session });
+        if (!message) return Object.freeze({ kind: "not-found" as const });
+        if (message.senderId !== userId) return Object.freeze({ kind: "forbidden" as const });
+        if (message.text.trim().length === 0) return Object.freeze({ kind: "not-editable" as const });
+        if ((message.editedAt ?? null)?.getTime() !== expectedEditedAt?.getTime()) {
+          return Object.freeze({ kind: "conflict" as const });
+        }
+        const updated = await messages.updateOne({
+          _id: messageId,
+          channelId,
+          senderId: userId,
+          hiddenForUserIds: { $nin: [userId] },
+          ...(expectedEditedAt === null
+            ? { $or: [{ editedAt: { $exists: false } }, { editedAt: null }] }
+            : { editedAt: expectedEditedAt })
+        }, {
+          $set: { text, editedAt }
+        }, { session });
+        if (updated.matchedCount === 0) return Object.freeze({ kind: "conflict" as const });
+        const updatedMessage = await messages.findOne({ _id: messageId, channelId }, { session });
+        if (!updatedMessage) return Object.freeze({ kind: "not-found" as const });
+        const messageReactions = await listStoredMessageReactions(database, session, {
+          workspaceId,
+          scope: "channel",
+          parentId: channelId,
+          messageIds: [messageId],
+          userId
+        });
+        return Object.freeze({
+          kind: "updated" as const,
+          message: updatedMessage,
+          reactions: messageReactions
+        });
+      });
+    },
     deleteForMember: async (workspaceId, channelId, userId, messageId, scope, isWorkspaceAdmin) => {
       await ensureReady();
       return runTransaction(async (session) => {

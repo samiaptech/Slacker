@@ -55,6 +55,24 @@ workspace switch hota rehta hai:
 - [Workspace rail aur tooltip ka istemal](apps/web/features/channels/components/channel-workspace.tsx)
 - [Dobara istemal hone wala tooltip primitive](packages/ui/src/primitives/tooltip.tsx)
 
+Workspace badalne par purane channel ka URL pehle workspace home par replace hota hai; phir
+naye workspace ki joined-channel list load hone ke baad `general` khulta hai. Agar `general`
+na mile to pehla joined channel khulta hai, aur agar koi joined channel na ho to workspace
+home par rehta hai. Is se purane workspace ka channel ID naye workspace ke context mein khul
+kar “channel unavailable” error nahi deta. Notification se workspace kholne ka behavior
+alag rehta hai, kyunki usay notification ke asal channel ya DM par jana hota hai.
+
+- [Workspace switch ke baad default channel navigation](apps/web/features/channels/components/channel-workspace.tsx)
+
+Workspace se leave karne par client ab `router.replace("/")` se internal route badalta hai.
+Agar doosra workspace hai to uski access pehle fetch karke mounted workspace context update hota
+hai; koi workspace na bache to create-workspace flow khulta hai. Auth expiry par sign-in route
+par client navigation hoti hai, aur leave dialog successful switch ke baad band hota hai. Is se
+relative `window.location.assign("/")` lint warning bhi resolve hoti hai.
+
+- [Workspace access, leave ke baad aglay workspace par jana](apps/web/features/identity/components/workspace-access.tsx)
+- [Leave confirmation dialog](apps/web/features/workspace-foundation/components/workspace-leave-action.tsx)
+
 Sidebar search type karte hi visible lists ko filter nahi karti. Iske bajaye ek fixed search
 dialog khulta hai. Search input ki state dialog ke andar rehti hai, jis se layout hilta nahi aur
 bila zaroorat workspace dobara render nahi hota:
@@ -102,6 +120,11 @@ viewport ka pehla nazar aane wala message wahi jagah par rehta hai.
 - [Direct-message row](apps/web/features/direct-messages/components/direct-message-item.tsx)
 - [Direct-message loading skeleton](apps/web/features/direct-messages/components/direct-message-loading.tsx)
 - [Timeline scroll anchor ko capture aur restore karna](apps/web/features/conversation-history/scroll-position.ts)
+
+Mobile/browser back agar purane workspace ka ya ab delete ho chuka DM URL khol de aur API
+`403`/`404` de, to DM page us stale history entry ko workspace home se replace karti hai.
+Is se “Direct message unavailable” error par phansne ke bajaye member workspace mein wapas
+aa jata hai. Server/network errors aur setup error ab bhi apna retryable message dikhate hain.
 
 Message rows ko memoized feature components mein alag kiya gaya aur date grouping bhi memoize
 ki gayi. Is se composer mein type karne par poori timeline dobara nahi banti. Naya realtime ya
@@ -200,7 +223,8 @@ se fail hoti hain, jabke 13 tests pass hote hain; live MongoDB/browser verificat
 ## 5. Messages mein search
 
 Workspace search dialog channels, direct conversations, logon aur messages ko dhoondhta hai.
-Message search debounce hoti hai aur pages mein results laati hai; har matching message apne
+Message search API request 300 ms debounce hoti hai; purani request abort hoti hai aur uska late
+response naye query ko overwrite nahi karta. Results pages mein aate hain; har matching message apne
 context ke saath alag selectable result hota hai. Result select karne par dialog band hota,
 app mutaliqa channel ya DM par jati, zaroorat par purani history laati, phir us message tak
 scroll karke usay thori dair highlight karti hai. Target validate karke sirf ek baar consume
@@ -365,8 +389,8 @@ Team ke aglay feature ideas:
 
 1. **Emoji reactions:** Message row par controls aur counts se shuru karo; UI se pehle channel/DM
    contract aur realtime event backend owner se tay karo.
-2. **Apna message edit karna:** Edited indicator dikhana aur history/search/realtime ko ek jaisa
-   rakhna; permissions aur edit ka waqt backend owner se confirm karo.
+2. **Apna message edit karna — frontend aur backend implementation tayyar:** Neeche current UI
+  aur API handoff diya hai; populated live workspace verification pending hai.
 3. **Har channel ki notification settings:** `All / Mentions only / Muted` behavior tay karo;
    yeh bhi ke preference har user ki alag hogi aur devices ke darmiyan save rahegi ya nahi.
 4. **Saved messages:** Bookmark sirf us member ke liye private ho jo save kare; source channel/DM
@@ -375,6 +399,41 @@ Team ke aglay feature ideas:
    realtime aur mobile UI sab mutasir honge. Tay karo nesting sirf ek level ki hogi ya nahi, aur
    replies main timeline mein bhi dikhengi ya sirf thread mein.
 
+### Message editing — frontend implementation aur backend handoff
+
+Channel aur DM dono mein sirf apne text messages par `Edit message` action dikhta hai.
+Attachment-only messages editable nahi. Inline editor current text prefill karta hai, Unicode
+characters ka 4,000 limit/count dikhata hai, `Escape` se cancel aur `Ctrl/Cmd+Enter` se save
+karta hai. Blank aur unchanged text save nahi hota.
+
+Save API ko `PATCH` bhejne se pehle message row foran update hoti hai. Failure par asal text
+restore hota aur draft editor mein rehta hai. `409 message_edit_conflict` par latest history
+reload hoti hai taake draft dobara newest version par save ki ja sake. Successful response
+`editedAt` ke mutabiq `Edited` label dikhata hai. Channel/DM dono page `channel:message:updated`
+aur `direct-message:updated` realtime events ko runtime schema se parse karke active row update
+karti hain; API mutation primary source of truth rehti hai.
+
+- [Shared inline editor, API error mapping aur typed realtime listener](apps/web/features/conversation-history/)
+- [Shared message-edit state aur optimistic save/rollback](apps/web/features/conversation-history/use-message-edit.ts)
+- [Channel edit action aur API integration](apps/web/features/channels/components/channel-messages.tsx)
+- [DM edit action aur API integration](apps/web/features/direct-messages/components/direct-message-page.tsx)
+- [Channel aur DM row par editor/Edited label](apps/web/features/channels/components/channel-message-item.tsx), [DM row](apps/web/features/direct-messages/components/direct-message-item.tsx)
+
+Focused web TypeScript check aur mutaliqa frontend files ka ESLint pass hua; workspace access
+ka `no-location-assign-relative-destination` warning ab nahi aata. `git diff --check` bhi pass
+hua. Frontend tests nahi chalaye gaye. Changes local aur uncommitted hain.
+
+**Backend handoff complete:** `PATCH /channels/:channelId/messages/:messageId` aur
+`PATCH /direct-messages/:conversationId/messages/:messageId` ab author-only edits, current
+membership/participation checks, atomic `expectedEditedAt` conflict detection, `editedAt`
+persistence, complete message responses, aur `channel:message:updated` /
+`direct-message:updated` realtime events implement karte hain. Stale writes return `409
+message_edit_conflict`; non-author attempts return `403 message_edit_forbidden`. Search reads
+the canonical stored text; edits do not change unread state or conversation ordering. API tests,
+typecheck, build, and focused lint pass. A live MongoDB/browser verification remains pending;
+before deployment, run both channel and direct-message initializers (or the aggregate
+initializer) to update their strict validators. Frontend owner: verify save, conflict recovery,
+and realtime synchronization in a populated workspace after API deployment.
 ## 12. Frontend files ka naqsha
 
 | Zimmedari | Bunyadi code |

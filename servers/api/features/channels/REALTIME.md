@@ -38,6 +38,7 @@ The socket protocol is typed in the shared API realtime contracts.
 | Client to server | `channel:typing` | Send a short-lived typing state; identity comes from the socket |
 | Server to client | `workspace:ready`, `channel:ready` | Confirm authorized subscriptions |
 | Server to client | `channel:message:new` | Deliver a persisted message to channel members |
+| Server to client | `channel:message:updated` | Deliver an author-edited persisted message to channel members |
 | Server to client | `channel:members:changed` | Refresh the current channel member list |
 | Server to client | `workspace:channels:changed`, `workspace:members:changed` | Refresh workspace lists after successful changes |
 | Server to client | `workspace:presence:sync`, `workspace:presence:changed` | Synchronize and update online indicators |
@@ -72,7 +73,9 @@ endpoints rather than treating socket payloads as authoritative data.
   channel room; workspace removal notifies and disconnects the target's active
   sockets.
 - Message content is delivered only to the authorized channel room after the
-  persisted HTTP operation succeeds. Realtime failures are logged without
+  persisted HTTP operation succeeds. Edits are author-only, use an atomic
+  `editedAt` version check, and do not alter notification/unread state or message
+  ordering. Realtime failures are logged without
   message content and surfaced to the client as a recoverable error.
 - HTTP message reads and sends continue to enforce current membership and use
   `Cache-Control: no-store`; the socket is not a message-write API.

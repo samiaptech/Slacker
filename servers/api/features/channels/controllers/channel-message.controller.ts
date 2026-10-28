@@ -27,7 +27,7 @@ import { resolveChannelMemberAccess, sendChannelAccessError, type ChannelAccessD
 type ChannelMessageControllerDependencies = ChannelAccessDependencies & Readonly<{
   service: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
-  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageDeleted" | "publishMessageReactions">;
+  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageUpdated" | "publishMessageDeleted" | "publishMessageReactions">;
   notifications?: Pick<NotificationService, "notifyChannelMessage" | "markResourceRead">;
 }>;
 
@@ -39,6 +39,10 @@ const querySchema = z.object({
 const messageBodySchema = z.object({
   text: z.string().default("")
     .refine((text) => Array.from(text).length <= CHANNEL_MESSAGE_MAX_LENGTH)
+}).strict();
+const editMessageBodySchema = z.object({
+  text: z.string().refine((text) => Array.from(text).length <= CHANNEL_MESSAGE_MAX_LENGTH),
+  expectedEditedAt: z.iso.datetime().nullable().optional()
 }).strict();
 const deleteBodySchema = z.object({ scope: z.enum(["me", "everyone"]) }).strict();
 const reactionBodySchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJI) }).strict();
@@ -75,6 +79,7 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
     type: "message",
     text: message.text,
     createdAt: message.createdAt.toISOString(),
+    ...(message.editedAt !== undefined ? { editedAt: message.editedAt?.toISOString() ?? null } : {}),
     reactions: message.reactions,
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({
     id: attachment.id,
@@ -132,6 +137,97 @@ export const createToggleChannelMessageReactionController = (
       reactions: result.reactions
     };
     realtime?.publishMessageReactions(access.access.workspace.id, channelId, body);
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
+  }
+};
+
+export const createEditChannelMessageController = (
+  { getIdentity, getWorkspaceAccess, service, realtime }: ChannelMessageControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendChannelAccessError(access, next);
+      return;
+    }
+    const { channelId, messageId } = request.params;
+    if (typeof channelId !== "string" || typeof messageId !== "string" || !channelId || !messageId) {
+      next(channelUnavailableError());
+      return;
+    }
+    const parsed = editMessageBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "body", reason: "invalid_message_edit" }
+      }));
+      return;
+    }
+    const expectedEditedAt = parsed.data.expectedEditedAt
+      ? new Date(parsed.data.expectedEditedAt)
+      : null;
+    const result = await service.edit(
+      access.access.workspace.id,
+      channelId,
+      access.access.user.id,
+      messageId,
+      parsed.data.text,
+      expectedEditedAt,
+      { name: access.access.user.name, image: access.access.user.image }
+    );
+    if (result.kind === "unavailable") {
+      next(messageStorageError());
+      return;
+    }
+    if (result.kind === "not-found") {
+      next(channelUnavailableError());
+      return;
+    }
+    if (result.kind === "forbidden") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageEditForbidden,
+        message: ERROR_MESSAGES.messageEditForbidden,
+        status: HTTP_STATUS.forbidden
+      }));
+      return;
+    }
+    if (result.kind === "conflict") {
+      next(createApplicationError({
+        code: ERROR_CODES.messageEditConflict,
+        message: ERROR_MESSAGES.messageEditConflict,
+        status: HTTP_STATUS.conflict
+      }));
+      return;
+    }
+    if (result.kind === "not-editable") {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "text", reason: "message_not_editable" }
+      }));
+      return;
+    }
+    if (result.kind === "invalid") {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "text", reason: result.error }
+      }));
+      return;
+    }
+    const body = toMessageResponse(result.message);
+    if (!("senderId" in body)) {
+      next(channelUnavailableError());
+      return;
+    }
+    realtime?.publishMessageUpdated(access.access.workspace.id, channelId, body);
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
     next(error);

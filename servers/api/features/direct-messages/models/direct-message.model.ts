@@ -46,6 +46,7 @@ export const DIRECT_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
       senderId: Object.freeze({ bsonType: "string", minLength: 1 }),
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
+      editedAt: Object.freeze({ bsonType: ["date", "null"] }),
       hiddenForUserIds: Object.freeze({
         bsonType: "array",
         uniqueItems: true,

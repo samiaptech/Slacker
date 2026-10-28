@@ -62,6 +62,7 @@ export type ChannelMessageResponse = Readonly<{
   type?: "message";
   text: string;
   createdAt: string;
+  editedAt?: string | null;
   attachments?: readonly ChatAttachmentResponse[];
   reactions: readonly MessageReactionResponse[];
   sender: Readonly<{
