@@ -1,6 +1,7 @@
 import { memo, type ReactElement } from "react";
 import Image from "next/image";
 import { FileText } from "lucide-react";
+import { ChannelMessageText } from "./channel-message-text";
 import type { MessageReactionEmoji } from "@workspace/types";
 import {
   MessageActions,
@@ -33,6 +34,7 @@ type ChannelMessageItemProps = Readonly<{
   isReactionPending: boolean;
   currentUserId: string;
   currentUserName: string;
+  mentionNames: ReadonlyMap<string, string>;
   editDraft: string;
   onDownloadAttachment: (attachment: ChannelMessageAttachment) => void;
   loadImagePreview: (attachment: MessageAttachment, signal: AbortSignal) => Promise<string>;
@@ -76,6 +78,7 @@ const ChannelMessageItemView = ({
   isReactionPending,
   currentUserId,
   currentUserName,
+  mentionNames,
   editDraft,
   onDelete,
   onEdit,
@@ -125,7 +128,7 @@ const ChannelMessageItemView = ({
           />
         ) : message.text ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <p className="w-fit max-w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
+            <ChannelMessageText memberNames={mentionNames} text={message.text} />
             {!deliveryState ? <MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /> : null}
           </div>
         ) : !deliveryState ? <div className="mt-1"><MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /></div> : null}

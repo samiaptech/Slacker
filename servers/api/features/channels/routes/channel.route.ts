@@ -13,6 +13,9 @@ import {
   createLeaveChannelController,
   createInviteChannelMemberController,
   createListChannelMembersController,
+  createListChannelMentionMembersController,
+  createGetChannelNotificationPreferenceController,
+  createSetChannelNotificationPreferenceController,
   createRemoveChannelMemberController,
   createListChannelsController,
   createListChannelMessagesController,
@@ -157,6 +160,21 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     getWorkspaceAccess: dependencies.getWorkspaceAccess,
     getMemberEmailVisibility: dependencies.getMemberEmailVisibility,
     listMembers: dependencies.service.listMembers
+  }));
+  router.get("/channels/:channelId/mention-members", createListChannelMentionMembersController({
+    getIdentity: dependencies.getIdentity,
+    getWorkspaceAccess: dependencies.getWorkspaceAccess,
+    listMentionMembers: dependencies.service.listMentionMembers
+  }));
+  router.get("/channels/:channelId/notification-preference", createGetChannelNotificationPreferenceController({
+    getIdentity: dependencies.getIdentity,
+    getWorkspaceAccess: dependencies.getWorkspaceAccess,
+    service: dependencies.service
+  }));
+  router.patch("/channels/:channelId/notification-preference", createSetChannelNotificationPreferenceController({
+    getIdentity: dependencies.getIdentity,
+    getWorkspaceAccess: dependencies.getWorkspaceAccess,
+    service: dependencies.service
   }));
   router.post("/channels/:channelId/invitations", createInviteChannelMemberController({
     getIdentity: dependencies.getIdentity,

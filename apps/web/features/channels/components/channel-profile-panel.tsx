@@ -9,6 +9,7 @@ import { channelMembersResponseSchema } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelProfileContent, type ChannelProfileMemberView } from "./channel-profile-content";
+import { ChannelNotificationPreferences } from "./channel-notification-preferences";
 
 type ChannelProfilePanelProps = Readonly<{
   apiBaseUrl: string;
@@ -126,6 +127,14 @@ export const ChannelProfilePanel = ({
       errorMessage={loadError}
       isLoading={isLoading}
       members={members?.members ?? []}
+      notificationSettings={(
+        <ChannelNotificationPreferences
+          apiBaseUrl={apiBaseUrl}
+          channelId={channelId}
+          enabled={isPage || isOpen}
+          workspaceId={activeWorkspace.id}
+        />
+      )}
       onRetry={() => setReloadToken((current) => current + 1)}
       visibility={visibility}
     />
@@ -157,11 +166,11 @@ export const ChannelProfilePanel = ({
             </div>
           </div>
         </main>
-      ) : isOpen ? (
-        <aside aria-label={`About #${channelName}`} className="hidden min-h-0 w-80 shrink-0 flex-col overflow-y-auto border-l border-[#e8ece7] bg-[#f8f8f4] lg:flex" id="channel-profile-panel">
+      ) : (
+        <aside aria-label={`About #${channelName}`} className={`${isOpen ? "lg:flex" : "hidden"} hidden min-h-0 w-80 shrink-0 flex-col overflow-y-auto border-l border-[#e8ece7] bg-[#f8f8f4]`} id="channel-profile-panel">
           {profile}{management}
         </aside>
-      ) : null}
+      )}
     </>
   );
 };

@@ -153,6 +153,88 @@ void test("initializes validators and indexes for channels, memberships, and ide
 
   assert.equal(calls.filter((call) => typeof call === "object" && call !== null && "operation" in call && call.operation === "createCollection").length, 3);
   assert.equal(calls.filter((call) => typeof call === "object" && call !== null && "operation" in call && call.operation === "createIndex").length, 5);
+  assert.deepEqual(
+    CHANNEL_MEMBERSHIPS_COLLECTION_VALIDATOR.$jsonSchema.properties.notificationPreference,
+    { enum: ["all", "mentions_only", "muted"] }
+  );
+});
+
+void test("reads legacy channel preferences as all and transactionally stores only authorized member updates", async () => {
+  const calls: unknown[] = [];
+  const session = {};
+  const membership: { channelId: string; userId: string; notificationPreference?: string } = {
+    channelId: "channel-1",
+    userId: "member-1"
+  };
+  const asRecord = (value: unknown): Readonly<Record<string, unknown>> =>
+    typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
+  const database = {
+    listCollections: ({ name }: Readonly<{ name: string }>) => ({
+      next: () => Promise.resolve({
+        name,
+        options: { validator: definitions.get(name)?.validator }
+      })
+    }),
+    collection: (name: string) => ({
+      indexes: () => Promise.resolve((definitions.get(name)?.indexes ?? []).map((index) => ({
+        name: index.options.name,
+        key: index.keys,
+        unique: index.options.unique,
+        ...(index.options.partialFilterExpression
+          ? { partialFilterExpression: index.options.partialFilterExpression }
+          : {})
+      }))),
+      findOne: (filter: unknown, options?: unknown) => {
+        calls.push({ operation: "findOne", name, filter, options });
+        const criteria = asRecord(filter);
+        if (name === CHANNELS_COLLECTION) {
+          return Promise.resolve(criteria._id === "channel-1"
+            && criteria.workspaceId === "workspace-1"
+            && criteria.lifecycleState === "active"
+            ? { _id: "channel-1", workspaceId: "workspace-1", lifecycleState: "active" }
+            : null);
+        }
+        return Promise.resolve(criteria.channelId === membership.channelId
+          && criteria.userId === membership.userId ? membership : null);
+      },
+      updateOne: (filter: unknown, update: unknown, options?: unknown) => {
+        calls.push({ operation: "updateOne", name, filter, update, options });
+        const criteria = asRecord(filter);
+        const set = asRecord(asRecord(update).$set);
+        if (name !== CHANNEL_MEMBERSHIPS_COLLECTION
+          || criteria.channelId !== membership.channelId
+          || criteria.userId !== membership.userId
+          || typeof set.notificationPreference !== "string") {
+          return Promise.resolve({ matchedCount: 0 });
+        }
+        membership.notificationPreference = set.notificationPreference;
+        return Promise.resolve({ matchedCount: 1 });
+      }
+    })
+  } as unknown as MongoDatabase;
+  const withTransaction: MongoTransaction = (operation) => operation(session as never);
+  const storage = createMongoChannelStorage(database, withTransaction);
+
+  assert.equal(await storage.getNotificationPreference("workspace-1", "channel-1", "member-1"), "all");
+  assert.equal(await storage.getNotificationPreference("workspace-2", "channel-1", "member-1"), null);
+  assert.equal(await storage.getNotificationPreference("workspace-1", "channel-1", "outsider"), null);
+  assert.equal(await storage.setNotificationPreference(
+    "workspace-1", "channel-1", "member-1", "mentions_only"
+  ), "mentions_only");
+  assert.equal(membership.notificationPreference, "mentions_only");
+  const updateCall = calls.find((call) =>
+    typeof call === "object" && call !== null && "operation" in call && call.operation === "updateOne"
+  );
+  assert.deepEqual(updateCall, {
+    operation: "updateOne",
+    name: CHANNEL_MEMBERSHIPS_COLLECTION,
+    filter: { channelId: "channel-1", userId: "member-1" },
+    update: { $set: { notificationPreference: "mentions_only" } },
+    options: { session }
+  });
+  assert.equal(await storage.setNotificationPreference(
+    "workspace-1", "channel-1", "outsider", "muted"
+  ), null);
 });
 
 void test("checks the migration and scopes active-channel lookups to a workspace", async () => {

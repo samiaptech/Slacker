@@ -21,8 +21,10 @@ export { createChannelMessageRepository } from "./repositories/index.js";
 export type {
   ChannelCreationRequest,
   ChannelMembersResult,
+  ChannelMentionMembersResult,
   AddChannelMemberResult,
   RemoveChannelMemberResult,
+  ChannelNotificationPreferenceResult,
   ChannelDuplicateConstraint,
   ChannelDuplicateKeyError,
   ChannelRepository,
@@ -57,6 +59,8 @@ export type {
   JoinChannelServiceResult,
   LeaveChannelServiceResult,
   ChannelMembersServiceResult,
+  ChannelMentionMembersServiceResult,
+  ChannelNotificationPreferenceServiceResult,
   InviteChannelMemberServiceResult,
   RemoveChannelMemberServiceResult,
   ChannelMemberProfile,
@@ -66,6 +70,10 @@ export { createChannelRoutes } from "./routes/index.js";
 export { createGetChannelController } from "./controllers/index.js";
 export { createListChannelsController } from "./controllers/index.js";
 export { createJoinChannelController, createLeaveChannelController } from "./controllers/index.js";
+export {
+  createGetChannelNotificationPreferenceController,
+  createSetChannelNotificationPreferenceController
+} from "./controllers/index.js";
 export {
   createInviteChannelMemberController,
   createListChannelMembersController,

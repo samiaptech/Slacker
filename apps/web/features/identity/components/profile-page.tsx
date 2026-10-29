@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowLeft, BadgeCheck, Copy, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Copy, Mail, ShieldCheck, Users } from "lucide-react";
 import { Button, Input, Label } from "@workspace/ui";
 import { z } from "zod";
 import type { WorkspaceEmailVisibilityResponse, WorkspaceInviteLinkResponse } from "@workspace/types";
@@ -11,6 +11,8 @@ import { application } from "@/constants/application";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { workspaceEmailVisibilitySchema, workspaceMembersSchema } from "../types";
 import { createAuthenticationClient } from "./auth-client";
+import { ProfileDetailsCard } from "./profile-details-card";
+import { ProfileChannelNotifications } from "./profile-channel-notifications";
 
 type ProfilePageProps = Readonly<{ apiBaseUrl: string }>;
 type StoredInviteLink = WorkspaceInviteLinkResponse;
@@ -31,6 +33,7 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
   const [name, setName] = useState(currentUser.name);
   const [title, setTitle] = useState(currentUser.title ?? "");
   const [isSavingName, setIsSavingName] = useState(false);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [nameMessage, setNameMessage] = useState<string | null>(null);
   const [invite, setInvite] = useState<StoredInviteLink | null>(null);
   const [isCreatingInvite, setIsCreatingInvite] = useState(false);
@@ -123,11 +126,26 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
       setTitle(normalizedTitle);
       setCurrentUserProfile({ name: normalizedName, title: normalizedTitle || null });
       setNameMessage("Your profile was updated.");
+      setIsEditingDetails(false);
     } catch {
       setNameMessage("Your profile could not be updated. Check your connection and try again.");
     } finally {
       setIsSavingName(false);
     }
+  };
+
+  const beginEditingDetails = (): void => {
+    setName(currentUser.name);
+    setTitle(currentUser.title ?? "");
+    setNameMessage(null);
+    setIsEditingDetails(true);
+  };
+
+  const cancelEditingDetails = (): void => {
+    setName(currentUser.name);
+    setTitle(currentUser.title ?? "");
+    setNameMessage(null);
+    setIsEditingDetails(false);
   };
 
   const saveMemberEmailVisibility = async (visible: boolean): Promise<void> => {
@@ -255,34 +273,24 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
       </header>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(19rem,0.8fr)]">
-        <section aria-labelledby="profile-details-title" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
-          <div className="mb-6 flex items-start gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground"><UserRound aria-hidden="true" className="size-5" /></span>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground" id="profile-details-title">Your details</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Choose how teammates see you across {application.name}.</p>
-            </div>
-          </div>
-          <form className="space-y-5" onSubmit={(event) => void saveName(event)}>
-            <div className="space-y-2">
-              <Label htmlFor="profile-name">Display name</Label>
-              <Input autoComplete="name" className="h-11 rounded-xl bg-background" id="profile-name" maxLength={80} onChange={(event) => setName(event.currentTarget.value)} required value={name} />
-              <p className="text-xs text-muted-foreground">This is the name shown next to your messages.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="profile-title-field">Role or title <span className="font-normal text-muted-foreground">(optional)</span></Label>
-              <Input autoComplete="organization-title" className="h-11 rounded-xl bg-background" id="profile-title-field" maxLength={80} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="e.g. Product Designer" value={title} />
-            </div>
-            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
-              <Button className="rounded-xl px-5" disabled={isSavingName || (name.trim() === currentUser.name && title.trim() === (currentUser.title ?? ""))} type="submit">
-                {isSavingName ? "Saving changes…" : "Save changes"}
-              </Button>
-              {nameMessage ? <p className="text-sm text-muted-foreground" role="status">{nameMessage}</p> : null}
-            </div>
-          </form>
-        </section>
+        <ProfileDetailsCard
+          appName={application.name}
+          currentName={currentUser.name}
+          currentTitle={currentUser.title}
+          isEditing={isEditingDetails}
+          isSaving={isSavingName}
+          message={nameMessage}
+          name={name}
+          onCancel={cancelEditingDetails}
+          onEdit={beginEditingDetails}
+          onNameChange={setName}
+          onSave={(event) => { void saveName(event); }}
+          onTitleChange={setTitle}
+          title={title}
+        />
 
         <div className="space-y-6">
+          <ProfileChannelNotifications apiBaseUrl={apiBaseUrl} workspaceId={activeWorkspace.id} workspaceName={activeWorkspace.name} />
           {activeWorkspace.role === "admin" ? (
             <>
               <section aria-labelledby="workspace-email-visibility-title" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">

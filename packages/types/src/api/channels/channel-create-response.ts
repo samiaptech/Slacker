@@ -45,6 +45,22 @@ export type ChannelMembersResponse = Readonly<{
   canManage: boolean;
 }>;
 
+export type ChannelMentionMemberResponse = Readonly<{
+  id: string;
+  name: string;
+  image: string | null;
+}>;
+
+export type ChannelMentionMembersResponse = Readonly<{
+  members: readonly ChannelMentionMemberResponse[];
+}>;
+
+export type ChannelNotificationPreference = "all" | "mentions_only" | "muted";
+
+export type ChannelNotificationPreferenceResponse = Readonly<{
+  preference: ChannelNotificationPreference;
+}>;
+
 export type ChannelMemberMutationResponse = Readonly<{
   membership: ChannelMembershipResponse;
   alreadyMember: boolean;

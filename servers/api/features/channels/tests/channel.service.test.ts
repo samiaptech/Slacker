@@ -4,11 +4,13 @@ import type { Logger } from "@workspace/logging";
 import { decodeChannelListCursor, type Channel, type ChannelListQuery } from "../domain/index.js";
 import type { ChannelRepository, ChannelCreationRequest } from "../repositories/index.js";
 import { createChannelService } from "../services/index.js";
+import type { ChannelNotificationPreference } from "@workspace/types";
 
 const createHarness = (workspaceMembershipUnavailable = false) => {
   const channels = new Map<string, Channel>();
   const memberships = new Map<string, Parameters<ChannelRepository["createAtomically"]>[1]>();
   const requests = new Map<string, ChannelCreationRequest>();
+  const notificationPreferences = new Map<string, ChannelNotificationPreference>();
   let nextId = 0;
   const auditEvents: Readonly<Record<string, unknown>>[] = [];
   const logger: Logger = {
@@ -70,6 +72,36 @@ const createHarness = (workspaceMembershipUnavailable = false) => {
         memberships: [...memberships.values()].filter((item) => item.channelId === channelId)
       });
     },
+    listMentionMembers: (workspaceId, channelId, userId) => {
+      const channel = channels.get(channelId);
+      if (!channel || channel.workspaceId !== workspaceId || !memberships.has(`${channelId}:${userId}`)) {
+        return Promise.resolve({ kind: "channel-unavailable" as const });
+      }
+      return Promise.resolve({
+        kind: "listed" as const,
+        userIds: [...memberships.values()]
+          .filter((item) => item.channelId === channelId)
+          .map(({ userId: memberId }) => memberId)
+      });
+    },
+    getNotificationPreference: (workspaceId, channelId, userId) => {
+      const channel = channels.get(channelId);
+      if (!channel || channel.workspaceId !== workspaceId || !memberships.has(`${channelId}:${userId}`)) {
+        return Promise.resolve({ kind: "channel-unavailable" as const });
+      }
+      return Promise.resolve({
+        kind: "found" as const,
+        preference: notificationPreferences.get(`${channelId}:${userId}`) ?? "all"
+      });
+    },
+    setNotificationPreference: (workspaceId, channelId, userId, preference) => {
+      const channel = channels.get(channelId);
+      if (!channel || channel.workspaceId !== workspaceId || !memberships.has(`${channelId}:${userId}`)) {
+        return Promise.resolve({ kind: "channel-unavailable" as const });
+      }
+      notificationPreferences.set(`${channelId}:${userId}`, preference);
+      return Promise.resolve({ kind: "updated" as const, preference });
+    },
     addMember: (workspaceId, channelId, actorId, targetId, joinedAt) => {
       const channel = channels.get(channelId);
       const actor = memberships.get(`${channelId}:${actorId}`);
@@ -120,7 +152,13 @@ const createHarness = (workspaceMembershipUnavailable = false) => {
     id: "invitee",
     name: "Invited Member",
     email: "invitee@example.test",
-    image: null
+    image: null as string | null
+  };
+  const directoryOwner = {
+    id: "user-1",
+    name: "Channel Owner",
+    email: "owner@example.test",
+    image: "https://example.test/owner.png" as string | null
   };
   const service = createChannelService({
     repository,
@@ -135,10 +173,68 @@ const createHarness = (workspaceMembershipUnavailable = false) => {
           : { kind: "not-found" as const }
     ),
     findWorkspaceMembersByIds: (userIds) => Promise.resolve(userIds.flatMap((id) =>
-      id === directoryMember.id ? [directoryMember] : []))
+      id === directoryMember.id
+        ? [directoryMember]
+        : id === directoryOwner.id ? [directoryOwner] : []))
   });
-  return { service, channels, requests, auditEvents };
+  return { service, channels, memberships, requests, auditEvents };
 };
+
+void test("exposes per-member channel notification preference reads and updates", async () => {
+  const { service } = createHarness();
+  const created = await service.create({
+    workspaceId: "workspace-1",
+    creatorId: "user-1",
+    name: "general",
+    visibility: "public"
+  });
+  if (created.kind !== "created") throw new Error("Expected channel creation.");
+  const channelId = created.result.channel.id;
+
+  assert.deepEqual(await service.getNotificationPreference("workspace-1", channelId, "user-1"), {
+    kind: "found",
+    preference: "all"
+  });
+  assert.deepEqual(await service.setNotificationPreference(
+    "workspace-1", channelId, "user-1", "mentions_only"
+  ), { kind: "updated", preference: "mentions_only" });
+  assert.deepEqual(await service.getNotificationPreference("workspace-1", channelId, "user-1"), {
+    kind: "found",
+    preference: "mentions_only"
+  });
+  assert.deepEqual(await service.getNotificationPreference("workspace-2", channelId, "user-1"), {
+    kind: "channel-unavailable"
+  });
+});
+
+void test("lists only current channel members as sorted mention profiles without email", async () => {
+  const { service } = createHarness();
+  const created = await service.create({
+    workspaceId: "workspace-1",
+    creatorId: "user-1",
+    name: "private",
+    visibility: "private"
+  });
+  if (created.kind !== "created") throw new Error("Expected channel creation.");
+  await service.inviteMember("workspace-1", created.result.channel.id, "user-1", "invitee@example.test");
+
+  const listed = await service.listMentionMembers("workspace-1", created.result.channel.id, "user-1");
+  assert.deepEqual(listed, {
+    kind: "listed",
+    members: [
+      { id: "user-1", name: "Channel Owner", image: "https://example.test/owner.png" },
+      { id: "invitee", name: "Invited Member", image: null }
+    ]
+  });
+  assert.deepEqual(
+    await service.listMentionMembers("workspace-1", created.result.channel.id, "outsider"),
+    { kind: "channel-unavailable" }
+  );
+  assert.deepEqual(
+    await service.listMentionMembers("another-workspace", created.result.channel.id, "user-1"),
+    { kind: "channel-unavailable" }
+  );
+});
 
 void test("creates the creator admin membership and replays an idempotent request", async () => {
   const { service, channels, auditEvents } = createHarness();

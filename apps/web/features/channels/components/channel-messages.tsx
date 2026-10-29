@@ -15,6 +15,8 @@ import { useChannelRealtime } from "./channel-realtime-provider";
 import { useChannelMessageRefresh } from "./channel-message-refresh-context";
 import { requestChannelMessages } from "./channel-message-request";
 import { ChannelMessageItem } from "./channel-message-item";
+import { ChannelMentionSuggestions } from "./channel-mention-suggestions";
+import { useChannelMentions } from "./use-channel-mentions";
 import { ChannelSystemMessageItem } from "./channel-system-message-item";
 import {
   captureHistoryScrollAnchor,
@@ -111,6 +113,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const reactionRequestsRef = useRef(new Set<string>());
   const realtimeReactionUpdatesRef = useRef(new Map<string, readonly MessageReactionResponse[]>());
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const mentionTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -673,6 +676,16 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     }
   };
 
+  const mentions = useChannelMentions({
+    apiBaseUrl,
+    channelId,
+    workspaceId: activeWorkspace.id,
+    value: draft,
+    onValueChange: setDraft,
+    onTyping: updateTyping,
+    textareaRef: mentionTextareaRef
+  });
+
   return (
     <section aria-label="Channel conversation" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf8]">
       <p aria-live="polite" className="sr-only" role="status">{searchJump.announcement}</p>
@@ -732,6 +745,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                     isReactionPending={pendingReactionMessageIds.has(message.id)}
                     currentUserId={currentUser.id}
                     currentUserName={currentUser.name || currentUser.email}
+                    mentionNames={mentions.memberNames}
                     editDraft={messageEdit.editingMessageId === message.id ? messageEdit.draft : message.text}
                     message={message}
                     onCancelEdit={messageEdit.cancelEdit}
@@ -777,23 +791,39 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
               <Button aria-label="Attach files, up to 5 files and 10 MB each" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={() => attachmentInputRef.current?.click()} size="icon" title="Up to 5 files · 10 MB each" type="button" variant="ghost">
                 <Paperclip aria-hidden="true" className="size-4" />
               </Button>
+              <div className="relative min-w-0 flex-1">
+              {mentions.range ? (
+                <ChannelMentionSuggestions
+                  activeIndex={mentions.activeIndex}
+                  members={mentions.suggestions}
+                  onRetry={mentions.reload}
+                  onSelect={mentions.selectMember}
+                  status={mentions.status}
+                />
+              ) : null}
               <Textarea
+                aria-activedescendant={mentions.range && mentions.suggestions.length > 0 ? `channel-mention-option-${mentions.activeIndex}` : undefined}
+                aria-autocomplete="list"
+                aria-controls={mentions.range ? "channel-mention-options" : undefined}
+                aria-expanded={Boolean(mentions.range)}
                 className="max-h-36 min-h-12 resize-none border-0 shadow-none focus-visible:ring-0"
                 disabled={isSending || isLoading || Boolean(loadError)}
                 id="channel-message-draft"
                 onChange={(event) => {
                   const value = Array.from(event.currentTarget.value);
-                  const nextDraft = value.length <= 4_000 ? event.currentTarget.value : value.slice(0, 4_000).join("");
-                  setDraft(nextDraft);
-                  updateTyping(nextDraft);
+                  if (value.length <= 4_000) mentions.onChange(event);
                   setSendError(null);
                 }}
-                onBlur={stopTyping}
-                onKeyDown={handleComposerKeyDown}
+                onBlur={() => { stopTyping(); mentions.close(); }}
+                onClick={mentions.updateCaret}
+                onKeyDown={(event) => mentions.onKeyDown(event, handleComposerKeyDown)}
+                onKeyUp={mentions.updateCaret}
                 placeholder={`Message #${channelName}…`}
+                ref={mentionTextareaRef}
                 rows={1}
-                value={draft}
+                value={mentions.displayValue}
               />
+              </div>
               <Button aria-label="Send message" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={(!draft.trim() && selectedFiles.length === 0) || isSending || isLoading || Boolean(loadError)} size="icon" type="submit">
                 <Send aria-hidden="true" className="size-4" />
               </Button>

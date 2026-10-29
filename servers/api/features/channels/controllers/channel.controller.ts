@@ -3,6 +3,7 @@ import type { RequestHandler } from "express";
 import type {
   ChannelCreateResponse,
   ChannelListResponse,
+  ChannelMentionMembersResponse,
   ChannelMemberMutationResponse,
   ChannelMembersResponse,
   ChannelMembershipResponse,
@@ -96,6 +97,10 @@ type ChannelMemberControllerDependencies = ChannelAccessDependencies & Readonly<
   removeMember: ChannelService["removeMember"];
   realtime?: MembershipRealtimePublisher;
   notifications?: Pick<NotificationService, "notifyChannelActivity">;
+}>;
+
+type ChannelMentionMembersControllerDependencies = ChannelAccessDependencies & Readonly<{
+  listMentionMembers: ChannelService["listMentionMembers"];
 }>;
 
 const channelListQuerySchema = z.object({
@@ -563,6 +568,49 @@ export const createListChannelMembersController = (
     response.status(HTTP_STATUS.ok).json(body);
   } catch (error: unknown) {
     next(normalizeNotificationFailure(error));
+  }
+};
+
+export const createListChannelMentionMembersController = (
+  { getIdentity, getWorkspaceAccess, listMentionMembers }: ChannelMentionMembersControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const workspaceAccess = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (workspaceAccess.kind !== "allowed") {
+      sendChannelAccessError(workspaceAccess, next);
+      return;
+    }
+    const channelId = request.params.channelId;
+    if (typeof channelId !== "string" || channelId.length === 0) {
+      next(createApplicationError({
+        code: ERROR_CODES.routeNotFound,
+        message: ERROR_MESSAGES.channelUnavailable,
+        status: HTTP_STATUS.notFound
+      }));
+      return;
+    }
+    const result = await listMentionMembers(
+      workspaceAccess.access.workspace.id,
+      channelId,
+      workspaceAccess.access.user.id
+    );
+    if (result.kind !== "listed") {
+      next(result.kind === "unavailable"
+        ? createApplicationError({
+          code: ERROR_CODES.channelStorageUnavailable,
+          message: ERROR_MESSAGES.channelStorageUnavailable,
+          status: HTTP_STATUS.serviceUnavailable
+        })
+        : membershipResultError({ kind: "channel-unavailable" }));
+      return;
+    }
+    const body: ChannelMentionMembersResponse = {
+      members: result.members.map(({ id, name, image }) => ({ id, name, image }))
+    };
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(error);
   }
 };
 

@@ -5,6 +5,8 @@ export type {
   AddChannelMemberResult,
   ChannelCreationRequest,
   ChannelMembersResult,
+  ChannelMentionMembersResult,
+  ChannelNotificationPreferenceResult,
   RemoveChannelMemberResult,
   UpdateChannelResult,
   ChannelDuplicateConstraint,

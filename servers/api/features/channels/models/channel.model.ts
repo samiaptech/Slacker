@@ -1,5 +1,6 @@
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
 import type { Channel, ChannelMembership } from "../domain/index.js";
+import type { ChannelNotificationPreference } from "@workspace/types";
 
 export const CHANNELS_COLLECTION = "channels";
 export const CHANNEL_MEMBERSHIPS_COLLECTION = "channel_memberships";
@@ -7,7 +8,10 @@ export const CHANNEL_CREATION_REQUESTS_COLLECTION = "channel_creation_requests";
 export const CHANNEL_MESSAGES_COLLECTION = "channel_messages";
 
 export type ChannelDocument = Omit<Channel, "id"> & Readonly<{ _id: string; membershipRevision?: number }>;
-export type ChannelMembershipDocument = ChannelMembership & Readonly<{ _id: string }>;
+export type ChannelMembershipDocument = ChannelMembership & Readonly<{
+  _id: string;
+  notificationPreference?: ChannelNotificationPreference;
+}>;
 export type ChannelCreationRequestDocument = Readonly<{
   _id: string;
   workspaceId: string;
@@ -79,7 +83,8 @@ export const CHANNEL_MEMBERSHIPS_COLLECTION_VALIDATOR = Object.freeze({
       channelId: Object.freeze({ bsonType: "string", minLength: 1 }),
       userId: Object.freeze({ bsonType: "string", minLength: 1 }),
       role: Object.freeze({ enum: ["admin", "member"] }),
-      joinedAt: Object.freeze({ bsonType: "date" })
+      joinedAt: Object.freeze({ bsonType: "date" }),
+      notificationPreference: Object.freeze({ enum: ["all", "mentions_only", "muted"] })
     })
   })
 });

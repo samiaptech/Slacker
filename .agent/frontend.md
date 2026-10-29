@@ -391,8 +391,8 @@ Team ke aglay feature ideas:
    contract aur realtime event backend owner se tay karo.
 2. **Apna message edit karna — frontend aur backend implementation tayyar:** Neeche current UI
   aur API handoff diya hai; populated live workspace verification pending hai.
-3. **Har channel ki notification settings:** `All / Mentions only / Muted` behavior tay karo;
-   yeh bhi ke preference har user ki alag hogi aur devices ke darmiyan save rahegi ya nahi.
+3. **Per-channel notification settings — backend contract ready:** Frontend flow neeche documented
+   hai; populated browser mein persistence aur failure rollback verify karna baqi hai.
 4. **Saved messages:** Bookmark sirf us member ke liye private ho jo save kare; source channel/DM
    par wapas jane ka rasta do.
 5. **Threads:** Isay alag plan karo, kyunki storage, history, search, notifications, unread,
@@ -448,3 +448,78 @@ and realtime synchronization in a populated workspace after API deployment.
 | Identity aur profiles | [`apps/web/features/identity/components/`](apps/web/features/identity/components/) |
 | Theme aur responsive styles | [`apps/web/app/globals.css`](apps/web/app/globals.css), [`packages/ui/src/primitives/`](packages/ui/src/primitives/) |
 | CSP aur app configuration | [`apps/web/proxy.ts`](apps/web/proxy.ts), [`apps/web/config/`](apps/web/config/), [`apps/web/constants/application.ts`](apps/web/constants/application.ts) |
+
+## 13. Channel @mentions — frontend
+
+Channel composer mein `@` likhne par member picker current channel ke members ko dikhata hai.
+Member list `GET /channels/:channelId/mention-members` se channel/workspace scope par ek martaba
+load hoti hai; typing par network request nahi hoti. Search browser mein naam ke mutabiq hoti
+hai. Arrow keys se option badalta hai, Enter select karta hai, Escape list band karta hai; mouse
+selection bhi kaam karti hai. Loading, no-match aur retry states picker ke andar rehte hain.
+
+Selection composer mein `@Member Name` dikhati hai, jabke React state mein backend contract wala
+`@[member-id] ` token rehta hai; isliye send ke waqt maujooda notification flow ko sahi token
+milta hai. Draft mein text edit karne se pehle se select hue mention IDs bhi preserve rehte hain.
+Channel messages mein token current member ke naam aur highlighted style mein render hota hai;
+member ab channel mein na ho to `@Former member` fallback dikhta hai. Direct messages mein mention
+picker nahi hai, kyunki backend contract channel membership ke liye hai.
+
+- [Member fetch, local filtering, selection aur keyboard behavior](apps/web/features/channels/components/use-channel-mentions.ts)
+- [Mention suggestion list aur loading/error states](apps/web/features/channels/components/channel-mention-suggestions.tsx)
+- [Stored mention token ka readable message rendering](apps/web/features/channels/components/channel-message-text.tsx)
+- [Channel composer aur message-row integration](apps/web/features/channels/components/channel-messages.tsx), [message row](apps/web/features/channels/components/channel-message-item.tsx)
+
+Web TypeScript check aur focused ESLint zero warnings/errors ke saath pass hue. Populated browser
+session mein interaction verification abhi nahi hui. Frontend tabdeeliyan local aur uncommitted
+hain; backend files nahi chheri gayin.
+
+## 14. Har channel ki apni notification setting
+
+Channel ke About panel mein member apne liye `All activity`, `Mentions only`, ya `Muted` chun sakta
+hai. Har option ka asar seedha samjhaya gaya hai; note yeh bhi batata hai ke preference badalne se
+purani inbox notifications nahi mitengi. Panel band ho to settings fetch nahi hotin; kholne par
+authorized GET hota hai, response validate hota hai aur loaded choice panel band/reopen karne par
+client state mein rehti hai.
+
+Preference block compact rehta hai; member list settings ke neeche aati hai. About sidebar aur
+mobile About page parent surface ko scroll karte hain, jabke member list ke andar nested scroll
+area nahi hai—isse settings add hone ke baad bhi neeche ke members tak scroll kiya ja sakta hai.
+
+Choice change karne par UI foran nayi value dikhati, controls save ke dauran disable karti, aur
+`PATCH /channels/:channelId/notification-preference` ko selected workspace header aur JSON body
+bhejti hai. Kamyab response ki value dobara validate hoti hai. Request fail ho to pichli choice
+restore hoti aur inline retry/error guidance dikhai jati hai; GET fail ho to current access,
+session ya temporary service issue ke mutabiq retry state nazar aati hai. Preference har member ki
+apni hai; DM notifications ko yeh control nahi karta.
+
+- [Preference GET/PATCH UI, optimistic update aur rollback](apps/web/features/channels/components/channel-notification-preferences.tsx)
+- [Channel About panel mein placement aur panel visibility](apps/web/features/channels/components/channel-profile-panel.tsx)
+- [Profile panel composition](apps/web/features/channels/components/channel-profile-content.tsx)
+
+Web TypeScript check aur is feature ke focused ESLint pass hue. Browser mein save, reload aur
+failure rollback ka manual flow abhi verify nahi hua. Changes local aur uncommitted hain; backend
+files nahi chheri gayin.
+
+## 15. Profile details aur workspace-wide channel notification setting
+
+Profile details save hone par successful response ke baad edit form band hota hai aur saved name/
+title summary dikhati hai; `Edit details` se form dobara khulta hai. Cancel unsaved draft ko current
+profile se reset karta hai. Save fail ho to form aur draft khule rehte hain, error accessible alert
+mein dikhta hai.
+
+Profile ka `Channel notifications` card ek preference ko active workspace ke tamam currently
+joined channels par apply karta hai. Yeh existing paginated `GET /channels?scope=joined&limit=50`
+aur har channel ka existing notification-preference `PATCH` endpoint use karta hai. Pehle tamam
+channel pages validate hote hain, phir zyada se zyada chaar updates parallel hoti hain. UI progress,
+success, zero-channel aur partial-failure states dikhati hai; retry idempotent preference ko dobara
+tamam joined channels par apply karti hai. Sirf active workspace mutasir hota hai; naye channels
+apni default preference lete hain. Koi backend code ya contract nahi badla.
+
+- [Profile details edit/summary component](apps/web/features/identity/components/profile-details-card.tsx)
+- [Channel preference bulk-apply UI](apps/web/features/identity/components/profile-channel-notifications.tsx)
+- [Paged channel loading aur bounded preference updates](apps/web/features/identity/components/apply-channel-notification-preference.ts)
+- [Profile integration](apps/web/features/identity/components/profile-page.tsx)
+
+Web TypeScript check aur focused ESLint pass hue. Browser mein profile save aur multiple-channel
+bulk update ka manual verification abhi baqi hai. Changes local aur uncommitted hain; backend
+files nahi chheri gayin.

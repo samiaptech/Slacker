@@ -72,6 +72,8 @@ const departureEntry = Object.freeze({
   text: "" as const,
   createdAt: new Date("2026-10-13T00:00:00.000Z")
 });
+const channelNotificationPreferences = new Map<string, "all" | "mentions_only" | "muted">();
+let notificationPreferenceStorageUnavailable = false;
 
 const startApi = async (
   create: ChannelService["create"],
@@ -93,7 +95,9 @@ const startApi = async (
   },
   attachmentStorage?: ChatAttachmentIntegration,
   updateChannel?: ChannelService["update"],
-  realtime?: Parameters<typeof createApp>[0]["channelRealtime"]
+  realtime?: Parameters<typeof createApp>[0]["channelRealtime"],
+  listMentionMembers: ChannelService["listMentionMembers"] = () =>
+    Promise.resolve({ kind: "channel-unavailable" })
 ) => {
   const workspaceFixture = createWorkspaceServiceFixture();
   workspaceFixture.seed("workspace-configured", [memberIdentity.id, otherMemberIdentity.id]);
@@ -116,6 +120,29 @@ const startApi = async (
       leaveChannel,
       ensureGeneralChannel,
       listMembers,
+      listMentionMembers,
+      getNotificationPreference: (workspaceId, channelId, userId) => Promise.resolve(
+        notificationPreferenceStorageUnavailable
+          ? { kind: "unavailable" as const }
+          : workspaceId !== "workspace-configured" || channelId !== "channel-1"
+            || ![memberIdentity.id, otherMemberIdentity.id].includes(userId)
+            ? { kind: "channel-unavailable" as const }
+            : {
+              kind: "found" as const,
+              preference: channelNotificationPreferences.get(`${channelId}:${userId}`) ?? "all" as const
+            }
+      ),
+      setNotificationPreference: (workspaceId, channelId, userId, preference) => {
+        if (notificationPreferenceStorageUnavailable) {
+          return Promise.resolve({ kind: "unavailable" as const });
+        }
+        if (workspaceId !== "workspace-configured" || channelId !== "channel-1"
+          || ![memberIdentity.id, otherMemberIdentity.id].includes(userId)) {
+          return Promise.resolve({ kind: "channel-unavailable" as const });
+        }
+        channelNotificationPreferences.set(`${channelId}:${userId}`, preference);
+        return Promise.resolve({ kind: "updated" as const, preference });
+      },
       inviteMember,
       removeMember,
       ...(updateChannel ? { update: updateChannel } : {})
@@ -243,6 +270,55 @@ const createTestChannel: ChannelService["create"] = (input) => {
   };
   return Promise.resolve({ kind: "created" as const, replayed: false, result });
 };
+
+void test("lists safe mention profiles for authorized channel members", async (context) => {
+  const calls: unknown[][] = [];
+  const { server, url } = await startApi(
+    createTestChannel,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (workspaceId, channelId, userId) => {
+      calls.push([workspaceId, channelId, userId]);
+      return Promise.resolve({
+        kind: "listed",
+        members: [
+          { id: memberIdentity.id, name: memberIdentity.name, image: null },
+          { id: otherMemberIdentity.id, name: "Other Member", image: "https://example.test/member.png" }
+        ]
+      });
+    }
+  );
+  context.after(async () => server.stop());
+
+  const response = await fetch(`${url}/channel-1/mention-members`, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), {
+    members: [
+      { id: memberIdentity.id, name: memberIdentity.name, image: null },
+      { id: otherMemberIdentity.id, name: "Other Member", image: "https://example.test/member.png" }
+    ]
+  });
+  assert.deepEqual(calls, [["workspace-configured", "channel-1", memberIdentity.id]]);
+
+  const denied = await fetch(`${url}/channel-1/mention-members`, {
+    headers: { ...workspaceHeaders, "x-test-identity": "outside" }
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(calls.length, 1);
+});
 
 void test("creates a channel for an approved identity using server-derived workspace and user IDs", async (context) => {
   let received: unknown;
@@ -977,6 +1053,7 @@ void test("edits channel messages through the authenticated route and returns co
       });
     }
   };
+
   const { server, url } = await startApi(
     createTestChannel,
     undefined,
@@ -1023,4 +1100,105 @@ void test("edits channel messages through the authenticated route and returns co
   assert.equal((await patch("stale")).status, 409);
   assert.equal((await patch(" ")).status, 400);
   assert.equal(updates.length, 1);
+});
+
+void test("GET channel notification preference is private, no-store, and defaults legacy memberships to all", async (context) => {
+  channelNotificationPreferences.clear();
+  notificationPreferenceStorageUnavailable = false;
+  const { server, url } = await startApi(createTestChannel);
+  context.after(async () => {
+    notificationPreferenceStorageUnavailable = false;
+    await server.stop();
+  });
+  const endpoint = `${url}/channel-1/notification-preference`;
+
+  const unauthorized = await fetch(endpoint, { headers: workspaceHeaders });
+  assert.equal(unauthorized.status, 401);
+  assert.equal(unauthorized.headers.get("cache-control"), "no-store");
+
+  const currentMember = await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+  assert.equal(currentMember.status, 200);
+  assert.equal(currentMember.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await currentMember.json(), { preference: "all" });
+
+  const anotherMember = await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "other-member" }
+  });
+  assert.equal(anotherMember.status, 200);
+  assert.deepEqual(await anotherMember.json(), { preference: "all" });
+  const outsideMember = await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "outside" }
+  });
+  assert.equal(outsideMember.status, 403);
+
+  const missingChannel = await fetch(`${url}/missing/notification-preference`, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+  assert.equal(missingChannel.status, 404);
+  notificationPreferenceStorageUnavailable = true;
+  const unavailable = await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+  assert.equal(unavailable.status, 503);
+});
+
+void test("PATCH channel notification preference validates input, persists per member, and reports storage failure", async (context) => {
+  channelNotificationPreferences.clear();
+  notificationPreferenceStorageUnavailable = false;
+  const { server, url } = await startApi(createTestChannel);
+  context.after(async () => {
+    notificationPreferenceStorageUnavailable = false;
+    await server.stop();
+  });
+  const endpoint = `${url}/channel-1/notification-preference`;
+  const patch = (identity: string, body: unknown) => fetch(endpoint, {
+    method: "PATCH",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": identity
+    },
+    body: JSON.stringify(body)
+  });
+
+  const unauthorized = await fetch(endpoint, {
+    method: "PATCH",
+    headers: { ...workspaceHeaders, "content-type": "application/json" },
+    body: JSON.stringify({ preference: "muted" })
+  });
+  assert.equal(unauthorized.status, 401);
+  assert.equal(unauthorized.headers.get("cache-control"), "no-store");
+
+  for (const preference of ["mentions_only", "muted", "all"] as const) {
+    const updated = await patch("member", { preference });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await updated.json(), { preference });
+  }
+  assert.deepEqual(await (await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  })).json(), { preference: "all" });
+  assert.deepEqual(await (await fetch(endpoint, {
+    headers: { ...workspaceHeaders, "x-test-identity": "other-member" }
+  })).json(), { preference: "all" });
+
+  assert.equal((await patch("member", { preference: "sometimes" })).status, 400);
+  assert.equal((await patch("member", { preference: "muted", extra: true })).status, 400);
+  assert.equal((await patch("other-member", { preference: "muted" })).status, 200);
+  assert.equal((await patch("outside", { preference: "muted" })).status, 403);
+  assert.equal((await fetch(`${url}/missing/notification-preference`, {
+    method: "PATCH",
+    headers: {
+      ...workspaceHeaders,
+      "content-type": "application/json",
+      "x-test-identity": "member"
+    },
+    body: JSON.stringify({ preference: "muted" })
+  })).status, 404);
+
+  notificationPreferenceStorageUnavailable = true;
+  const unavailable = await patch("member", { preference: "muted" });
+  assert.equal(unavailable.status, 503);
 });

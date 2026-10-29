@@ -1,5 +1,6 @@
 import type { Channel, ChannelMembership, ChannelSystemEntry } from "../domain/index.js";
 import type { Logger } from "@workspace/logging";
+import type { ChannelNotificationPreference } from "@workspace/types";
 import {
   prepareCreateChannelCommand,
   type ChannelListQuery,
@@ -69,6 +70,22 @@ export type ChannelMemberDetails = Readonly<ChannelMembership & {
 
 export type ChannelMembersServiceResult =
   | Readonly<{ kind: "listed"; members: readonly ChannelMemberDetails[]; canManage: boolean }>
+  | Readonly<{ kind: "channel-unavailable" }>
+  | Readonly<{ kind: "unavailable" }>;
+
+export type ChannelMentionMemberProfile = Readonly<{
+  id: string;
+  name: string;
+  image: string | null;
+}>;
+
+export type ChannelMentionMembersServiceResult =
+  | Readonly<{ kind: "listed"; members: readonly ChannelMentionMemberProfile[] }>
+  | Readonly<{ kind: "channel-unavailable" }>
+  | Readonly<{ kind: "unavailable" }>;
+
+export type ChannelNotificationPreferenceServiceResult =
+  | Readonly<{ kind: "found" | "updated"; preference: ChannelNotificationPreference }>
   | Readonly<{ kind: "channel-unavailable" }>
   | Readonly<{ kind: "unavailable" }>;
 
@@ -161,6 +178,52 @@ export const createChannelService = ({
           });
         }))
       });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  listMentionMembers: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string
+  ): Promise<ChannelMentionMembersServiceResult> => {
+    try {
+      const result = await repository.listMentionMembers(workspaceId, channelId, userId);
+      if (result.kind !== "listed") return result;
+      const currentMemberIds = new Set(result.userIds);
+      const profiles = await findWorkspaceMembersByIds([...currentMemberIds]);
+      const membersById = new Map(profiles
+        .filter(({ id }) => currentMemberIds.has(id))
+        .map(({ id, name, image }) => [id, Object.freeze({ id, name, image })]));
+      const members = [...membersById.values()]
+        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+      return Object.freeze({ kind: "listed", members: Object.freeze(members) });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  getNotificationPreference: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string
+  ): Promise<ChannelNotificationPreferenceServiceResult> => {
+    try {
+      return await repository.getNotificationPreference(workspaceId, channelId, userId);
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  setNotificationPreference: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    preference: ChannelNotificationPreference
+  ): Promise<ChannelNotificationPreferenceServiceResult> => {
+    try {
+      return await repository.setNotificationPreference(workspaceId, channelId, userId, preference);
     } catch (error: unknown) {
       if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
       throw error;

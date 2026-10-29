@@ -442,3 +442,66 @@ mehdood nahi.
   hai kyunki strict channel/DM message validators ab `editedAt` allow karte hain. API suite
   169 passed / 2 optional Mongo tests skipped, API typecheck/build aur focused ESLint pass;
   live MongoDB migration aur populated-browser flow abhi verify nahi hue.
+
+## 15. Channel @mentions — backend contract
+
+- Composer mention candidates ke liye
+  `GET /channels/:channelId/mention-members` call kare. Route
+  [channel.route.ts](../servers/api/features/channels/routes/channel.route.ts#L162) ko
+  [mention-member controller](../servers/api/features/channels/controllers/channel.controller.ts#L574)
+  se jorta hai. Response ka shared shape
+  [channel-create-response.ts](../packages/types/src/api/channels/channel-create-response.ts#L58)
+  mein hai: sirf current channel members ke stable `id`, `name`, aur `image`; email expose
+  nahi hota. Endpoint public aur private channels dono ke liye hai. Workspace access
+  authenticate hota hai, channel membership dobara verify hoti hai; missing ya inaccessible
+  channel ko privacy-safe `404`, aur response ko `Cache-Control: no-store` milta hai.
+- [Channel service](../servers/api/features/channels/services/channel.service.ts#L180)
+  authorized membership IDs se bulk identity lookup karti aur safe profiles ko name ke
+  mutabiq sort karti. Frontend is list ko ek martaba load karke local filter kare, har
+  keystroke par API request na bheje.
+- Member choose hone par frontend message text mein `@[user-id]` token bheje aur render mein
+  usi ID ka current display name dikhaye. Existing authenticated send controller
+  [channel-message.controller.ts](../servers/api/features/channels/controllers/channel-message.controller.ts#L508)
+  message persist hone ke baad notification flow call karta; realtime channel broadcast bhi
+  isi send flow mein hota hai. Separate mention-send endpoint ya database migration nahi hai.
+- [Notification service](../servers/api/features/notifications/service.ts#L60) token IDs
+  deduplicate karti aur `notifyChannelMessage` mein pass karti
+  ([line 99](../servers/api/features/notifications/service.ts#L99)).
+  [Mongo notification storage](../servers/api/features/notifications/mongo-storage.ts#L117)
+  sirf current channel memberships ko recipients banata, sender ko suppress karta, aur
+  mention ko normal channel-message notification ki jagah ek hi record banata hai. Unknown
+  ya doosre channel ke IDs notification nahi paate.
+
+## 16. Per-member channel notification preferences
+
+- Current workspace member apni preference read/update kar sakta hai:
+  `GET /channels/:channelId/notification-preference` aur
+  `PATCH /channels/:channelId/notification-preference` with
+  `{ "preference": "all" | "mentions_only" | "muted" }`. Dono
+  [channel routes](../servers/api/features/channels/routes/channel.route.ts#L169) authenticated
+  identity aur workspace access ke saath controller mein jate hain; current channel membership
+  zaroori hai. Private ya doosre member ki preference read/change nahi ho sakti. Missing ya
+  inaccessible channel `404`, invalid input `400`, unauthenticated request `401`, storage
+  unavailable `503`; responses `Cache-Control: no-store` hain. Shared response contract
+  [channel-create-response.ts](../packages/types/src/api/channels/channel-create-response.ts#L48)
+  mein defined hai.
+- `all` channel messages, explicit mentions aur channel activity (`member_joined`,
+  `member_left`, `channel_updated`) ke notifications leta hai. `mentions_only` sirf explicit
+  `@[user-id]` message mentions leta hai; `muted` mentions samet channel notifications rokta
+  hai. DM notifications alag hain aur in preferences se mutasir nahi. Legacy membership
+  documents mein missing preference `all` samjhi jati hai. Setting badalne par pehle se
+  stored notifications delete/reclassify nahi hotin; nayi notification creation par setting
+  apply hoti hai.
+- Preference `channel_memberships` par optional `notificationPreference` field mein store
+  hoti hai. [Mongo channel storage](../servers/api/features/channels/integrations/mongo-channel.storage.ts#L236)
+  workspace ke active channel aur current membership verify karti; writes Mongo transaction
+  mein hote hain aur membership revision mutate nahi karte. Existing
+  [channels initializer](../servers/api/features/channels/models/channel.model.ts#L87)
+  strict membership validator update karta; deployment se pehle
+  `pnpm --filter @workspace/api channels:initialize` ya root `pnpm run initialize` chalayein.
+- [Notification storage](../servers/api/features/notifications/mongo-storage.ts#L127) channel
+  message mentions, normal messages aur channel activity ke eligible recipients filter karti.
+  `notification.mongo-storage.test.ts` all/mentions-only/muted, activity, actor exclusion,
+  deduplication aur DM independence verify karta. Channel route, repository, service aur
+  Mongo storage tests preference access, validation, member isolation, legacy default,
+  storage errors aur revision stability cover karte hain.

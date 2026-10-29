@@ -107,9 +107,37 @@ hash and `crossorigin` before release.
 Notifications are durable and scoped to the authenticated user. They contain event
 metadata only; message bodies are not copied into the inbox. The actor never receives a
 notification for their own action. A single `(recipientId, eventId)` can be stored once.
+The composer can load mention candidates with authenticated
+`GET /channels/:channelId/mention-members`. The response is
+`{ "members": [{ "id": "user-id", "name": "Member", "image": null }] }`;
+it includes only current members of that channel and deliberately excludes email addresses.
+The endpoint works for public and private channels, returns `Cache-Control: no-store`, and
+conceals missing channels and non-member access. Clients can fetch once when opening the
+composer and filter the channel-member list locally rather than making a request
+for every keystroke.
 When a channel message explicitly mentions a member, that member receives `mention`
 instead of a second `channel_message` notification. Mentions use the stable-ID syntax
 `@[user-id]`; only current channel members matching an ID are notified.
+After a member is selected, the client stores the member ID in that token while rendering
+the member's display name. The existing message-send endpoint persists the token as message
+text, and the notification service extracts it after persistence. Unknown IDs, IDs from
+another channel, duplicate tokens, and the actor do not create extra mention notifications.
+
+Members can read and update their own per-channel notification setting through
+`GET /channels/:channelId/notification-preference` and
+`PATCH /channels/:channelId/notification-preference`. The PATCH body is
+`{ "preference": "all" | "mentions_only" | "muted" }`; both endpoints return the selected
+preference in the same shape. Access requires current workspace access and channel
+membership, including for private channels. A missing or inaccessible channel returns 404,
+invalid input returns 400, unauthenticated requests return 401, and storage readiness
+failures return 503. Responses use `Cache-Control: no-store`.
+
+`all` receives channel message, explicit mention, and channel activity notifications;
+`mentions_only` receives only explicit `@[user-id]` mention notifications; `muted` receives
+none of those notifications, including mentions. Direct-message notifications are unaffected.
+Existing notifications are retained and are not reclassified when a preference changes;
+the setting applies to notifications created after the change. Memberships without the
+optional preference field (including legacy records) default to `all`.
 
 `GET /notifications?limit=30&before=<cursor>` returns the caller's newest notifications,
 across workspaces, with a maximum page size of 100:
@@ -196,9 +224,19 @@ sender. The message validator update is installed by the existing channel initia
 
 Before deployment, run `pnpm --filter @workspace/api notifications:initialize` against the
 intended MongoDB to create/update `user_notifications` and its validator/indexes. Also run
-`pnpm --filter @workspace/api channels:initialize` for the typed channel-history validator
-change. These are explicit migrations; API startup does not run them. No initializer was
-run as part of this change. The root `pnpm run initialize` command now runs both migrations
-as part of the complete workspace setup. Missing notification migration/storage returns HTTP 503
+`pnpm --filter @workspace/api channels:initialize` to install channel membership and
+typed channel-history validators, including the optional notification preference field.
+These are explicit migrations; API startup does not run them. No initializer was run as
+part of this change. The root `pnpm run initialize` command runs both migrations as part of
+the complete workspace setup. Missing notification migration/storage returns HTTP 503
 (`internal_error`); malformed page/read inputs return 400 (`validation_error`), unauthenticated
 requests return 401, and inaccessible notification IDs return 404 (`route_not_found`).
+
+# API tests
+
+Run the API suite with `pnpm --dir servers/api test`. Jest runs the TypeScript test files
+serially; a compatibility adapter preserves the existing `node:test` declarations and
+strict deep-equality assertions across Jest's VM realms. The two MongoDB replica-set
+integration tests run only when `MONGODB_TEST_URI` targets an isolated database named
+`nutshyll_test_<name>`. Legacy nested subtests execute sequentially within their parent Jest
+test, so their assertions still fail the suite but are reported under the parent test.

@@ -104,10 +104,10 @@ inspect ordering and `--json` when another tool needs stable output.
 
 Updated: 2026-10-28.
 
-- **Suggested next chat features:** Emoji reactions and author-only message editing are
-  implemented; next consider per-member channel notification controls with clear
-  All / Mentions only / Muted behavior, then private saved messages with navigation back to
-  the source conversation. Threads/replies are the broadest change; plan them separately
+- **Suggested next chat features:** Emoji reactions, author-only message editing, and
+  per-member channel notification controls with All / Mentions only / Muted behavior are
+  implemented; next consider private saved messages with navigation back to the source
+  conversation. Threads/replies are the broadest change; plan them separately
   across persistence, history, notifications, unread state, realtime, and mobile UX, with an
   explicit decision on one-level threading and whether replies also appear in the main
   channel. Reorder if threads are the primary user need.
@@ -555,3 +555,43 @@ Updated: 2026-10-28.
   `apps/web/features/identity/components/workspace-access.tsx`. The hosted workflow has not
   rerun because these changes are uncommitted; deploy/browser and live MongoDB checks remain
   outstanding.
+
+- **Channel @mentions — backend slice ready:** Added authenticated
+  `GET /channels/:channelId/mention-members`, returning only current active channel members'
+  IDs, names, and images (no email), with workspace/channel access checks and no-store
+  responses. Existing `@[user-id]` message tokens already feed deduplicated, recipient-only
+  mention notifications after message persistence. No schema migration is required.
+  Validation: API tests 172 passed / 2 optional MongoDB tests skipped; API typecheck, lint,
+  and build passed; shared-types typecheck, lint, and build passed; `git diff --check` passed.
+  No live database/browser test or deployment ran, and `.env` was not inspected. Changes are
+  uncommitted on `slacker` at `505e09c`; frontend mention UI files and message component
+  edits are also uncommitted in the shared checkout and were not inspected or changed here.
+  The pre-existing `apps/web/next-env.d.ts` edit remains. Next owner: Frontend Codex should
+  coordinate and verify candidate loading, local filtering, stable-ID token serialization,
+  readable mention rendering, and recipient notification/realtime behavior in a populated
+  workspace.
+  Repository validation later found high advisory `GHSA-3f7j-7jwc-fxfj` through
+  `shadcn > @dotenvx/dotenvx > systeminformation@5.33.10`. The workspace override now pins
+  `systeminformation@5.33.16` (the advisory-fixed minimum), and the lockfile was updated.
+  `pnpm audit --audit-level high` and full `pnpm run validate` pass; 3 low and 6 moderate
+  advisories remain below the configured high threshold. No `.env` file was inspected.
+
+- **API Jest migration:** `servers/api` now runs its existing TypeScript test suite with Jest
+  in-band. The complete run passed 158 tests; 2 MongoDB replica-set integration tests were
+  skipped because `MONGODB_TEST_URI` was not configured. API typecheck, lint, build, and
+  `git diff --check` passed. A legacy-runner comparison passed 172 tests with the same 2
+  optional skips; Jest groups 15 nested legacy subtests under their parent cases, but executes
+  their assertions. Changes are local and uncommitted; no commit or push was made.
+
+- **Per-member channel notification preferences:** Added authenticated, no-store GET/PATCH
+  endpoints for each current channel member's `all`, `mentions_only`, or `muted` setting.
+  Settings are transactionally stored on channel memberships; legacy memberships default
+  to `all`. Channel messages, explicit mentions, and channel activity notifications now
+  respect the recipient preference; DMs are unaffected, and existing notifications remain
+  unchanged. API README and backend guide document behavior and the required
+  `channels:initialize` migration. Focused API tests initially failed when invoked directly
+  then passed (5 suites, 40 tests). Final API validation passed: Jest 163 passed / 2
+  optional MongoDB tests skipped; typecheck, lint, build, and `node:check` passed. Shared
+  types typecheck/lint/build, repository architecture validation, and `git diff --check`
+  passed. No live MongoDB migration, production test, or deployment ran; changes are
+  uncommitted in the shared checkout.

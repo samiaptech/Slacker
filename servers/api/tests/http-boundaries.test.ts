@@ -43,6 +43,9 @@ const channelService = {
   leaveChannel: () => Promise.resolve({ kind: "already-left" as const }),
   ensureGeneralChannel: () => Promise.resolve({ kind: "unavailable" as const }),
   listMembers: () => Promise.resolve({ kind: "channel-unavailable" as const }),
+  listMentionMembers: () => Promise.resolve({ kind: "channel-unavailable" as const }),
+  getNotificationPreference: () => Promise.resolve({ kind: "channel-unavailable" as const }),
+  setNotificationPreference: () => Promise.resolve({ kind: "channel-unavailable" as const }),
   inviteMember: () => Promise.resolve({ kind: "channel-unavailable" as const }),
   removeMember: () => Promise.resolve({ kind: "channel-unavailable" as const })
 };

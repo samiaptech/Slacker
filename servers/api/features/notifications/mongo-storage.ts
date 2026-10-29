@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import type { ChannelNotificationPreference } from "@workspace/types";
 import type { MongoDatabase } from "../../integrations/mongodb/index.js";
 import type { NotificationDocument } from "./model.js";
 import {
@@ -16,10 +17,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 const isCollectionExists = (error: unknown): boolean => isRecord(error) && error.code === 48;
 const isDuplicateKey = (error: unknown): boolean => isRecord(error) && error.code === 11000;
+const isChannelNotificationPreference = (value: unknown): value is ChannelNotificationPreference =>
+  value === "all" || value === "mentions_only" || value === "muted";
 
 export const createMongoNotificationStorage = (database: MongoDatabase): NotificationStorage => {
   const notifications = database.collection<NotificationDocument>(NOTIFICATIONS_COLLECTION);
-  const memberships = database.collection<{ userId: string }>("channel_memberships");
+  const memberships = database.collection<Readonly<{
+    userId: string;
+    notificationPreference?: ChannelNotificationPreference;
+  }>>("channel_memberships");
   const conversations = database.collection<{
     _id: string;
     workspaceId: string;
@@ -117,7 +123,15 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
     createForChannel: async (event, mentionedUserIds) => {
       return run(async () => {
         const channelMembers = await memberships.find({ channelId: event.resource.id }).toArray();
-        return createForRecipients(event, channelMembers.map(({ userId }) => userId), mentionedUserIds);
+        const mentioned = new Set(mentionedUserIds);
+        const recipients = channelMembers.flatMap(({ userId, notificationPreference }) => {
+          const preference: unknown = notificationPreference ?? "all";
+          if (!isChannelNotificationPreference(preference)) throw unavailable;
+          if (preference === "muted") return [];
+          if (event.type !== "channel_message") return preference === "all" ? [userId] : [];
+          return preference === "all" || mentioned.has(userId) ? [userId] : [];
+        });
+        return createForRecipients(event, recipients, mentionedUserIds);
       });
     },
     createForDirectMessage: async (event) => {

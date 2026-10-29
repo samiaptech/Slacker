@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
+import type { ReactNode } from "react";
 import { Crown, Globe2, Hash, LockKeyhole, Users } from "lucide-react";
 import { Button } from "@workspace/ui";
 import { Skeleton } from "@workspace/ui/primitives";
@@ -22,6 +23,7 @@ type ChannelProfileContentProps = Readonly<{
   isLoading: boolean;
   errorMessage: string | null;
   onRetry: () => void;
+  notificationSettings?: ReactNode;
 }>;
 
 const getInitials = (name: string | null, email: string | null): string =>
@@ -44,9 +46,10 @@ export const ChannelProfileContent = ({
   members,
   isLoading,
   errorMessage,
-  onRetry
+  onRetry,
+  notificationSettings
 }: ChannelProfileContentProps) => (
-  <div className="flex min-h-0 flex-col bg-transparent">
+  <div className="flex flex-col bg-transparent">
     <header className="border-b border-[#e6e9e2] px-5 py-4">
       <h2 className="text-sm font-semibold text-[#283b33]">About this channel</h2>
     </header>
@@ -63,7 +66,8 @@ export const ChannelProfileContent = ({
         {visibility === "public" ? "Public channel · Everyone’s welcome" : "Private channel"}
       </span>
     </section>
-    <section className="flex min-h-0 flex-1 flex-col px-4 py-5">
+    {notificationSettings}
+    <section className="flex flex-col px-4 py-5">
       <h3 className="flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-[#7d867f]">
         <Users aria-hidden="true" className="size-3.5" /> Members · {!isLoading && !errorMessage ? members.length : "—"}
       </h3>
@@ -76,7 +80,7 @@ export const ChannelProfileContent = ({
       ) : members.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">No members to show yet.</p>
       ) : (
-        <ul aria-label="Channel members" className="mt-3 min-h-0 space-y-0.5 overflow-y-auto">
+        <ul aria-label="Channel members" className="mt-3 space-y-0.5">
           {members.map((member) => {
             const name = member.name ?? "Workspace member";
             return (

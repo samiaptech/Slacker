@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { encodeChannelListCursor, type Channel, type ChannelListQuery, type ChannelMembership } from "../domain/index.js";
 import type { ChannelCreationRequestDocument, ChannelDocument, ChannelMembershipDocument, ChannelMessageDocument } from "../models/index.js";
 import { createChannelRepository, type ChannelStorage } from "../repositories/index.js";
+import type { ChannelNotificationPreference } from "@workspace/types";
 
 const channels = new Map<string, ChannelDocument>();
 const memberships = new Map<string, ChannelMembershipDocument>();
@@ -19,6 +20,7 @@ const storage: ChannelStorage = {
     const pendingRequests: ChannelCreationRequestDocument[] = [];
     const pendingChannelMessages: ChannelMessageDocument[] = [];
     const pendingMembershipDeletes: string[] = [];
+    const pendingNotificationPreferences = new Map<string, ChannelNotificationPreference>();
     const result = await operation({
       insertChannel: (document) => { pendingChannels.push(document); return Promise.resolve(); },
       insertMembership: (document) => {
@@ -46,7 +48,16 @@ const storage: ChannelStorage = {
       },
       findMembership: (channelId, userId) => Promise.resolve([...memberships.values()].find((item) =>
         item.channelId === channelId && item.userId === userId) ?? null),
-      findChannel: (workspaceId, channelId) => Promise.resolve(channels.get(channelId)?.workspaceId === workspaceId
+      updateMembershipNotificationPreference: (channelId, userId, preference) => {
+        const membership = [...memberships.values()].find((item) =>
+          item.channelId === channelId && item.userId === userId);
+        if (!membership) return Promise.resolve(false);
+        pendingNotificationPreferences.set(membership._id, preference);
+        return Promise.resolve(true);
+      },
+      findChannel: (workspaceId, channelId) => Promise.resolve(
+        channels.get(channelId)?.workspaceId === workspaceId
+        && channels.get(channelId)?.lifecycleState === "active"
         ? channels.get(channelId) ?? null
         : null),
       updateChannelMetadata: (workspaceId, channelId, metadata) => {
@@ -67,6 +78,10 @@ const storage: ChannelStorage = {
     for (const document of pendingRequests) requests.set(document._id, document);
     channelMessages.push(...pendingChannelMessages);
     for (const membershipId of pendingMembershipDeletes) memberships.delete(membershipId);
+    for (const [membershipId, notificationPreference] of pendingNotificationPreferences) {
+      const membership = memberships.get(membershipId);
+      if (membership) memberships.set(membershipId, Object.freeze({ ...membership, notificationPreference }));
+    }
     return result;
   },
   findByWorkspaceAndName: (workspaceId, name) => Promise.resolve([...channels.values()].find((channel) =>
@@ -92,6 +107,25 @@ const storage: ChannelStorage = {
     membership.channelId === channelId && membership.userId === userId) ?? null),
   findMemberships: (channelId) => Promise.resolve([...memberships.values()].filter((membership) =>
     membership.channelId === channelId)),
+  getNotificationPreference: (workspaceId, channelId, userId) => {
+    const activeChannel = channels.get(channelId);
+    if (activeChannel?.workspaceId !== workspaceId || activeChannel.lifecycleState !== "active") {
+      return Promise.resolve(null);
+    }
+    const membership = [...memberships.values()].find((item) =>
+      item.channelId === channelId && item.userId === userId);
+    return Promise.resolve(membership ? membership.notificationPreference ?? "all" : null);
+  },
+  setNotificationPreference: async (workspaceId, channelId, userId, notificationPreference) => {
+    const activeChannel = channels.get(channelId);
+    if (activeChannel?.workspaceId !== workspaceId || activeChannel.lifecycleState !== "active") return null;
+    const membership = [...memberships.values()].find((item) =>
+      item.channelId === channelId && item.userId === userId);
+    if (!membership) return null;
+    const updated = await storage.withTransaction(async (transaction) =>
+      transaction.updateMembershipNotificationPreference(channelId, userId, notificationPreference));
+    return updated ? notificationPreference : null;
+  },
   findCreationRequest: (workspaceId, actorId, key) => Promise.resolve([...requests.values()].find((request) =>
     request.workspaceId === workspaceId && request.actorId === actorId && request.key === key) ?? null)
 };
@@ -129,6 +163,16 @@ void test("persists channel and creator membership together and maps ids to publ
   assert.deepEqual(await repository.findById("workspace-1", "channel-1"), channel);
   assert.deepEqual(await repository.findForMember("workspace-1", "user-1"), [channel]);
   assert.deepEqual(await repository.findForMember("workspace-1", "user-2"), []);
+  assert.deepEqual(await repository.listMentionMembers("workspace-1", "channel-1", "user-1"), {
+    kind: "listed",
+    userIds: ["user-1"]
+  });
+  assert.deepEqual(await repository.listMentionMembers("workspace-1", "channel-1", "user-2"), {
+    kind: "channel-unavailable"
+  });
+  assert.deepEqual(await repository.listMentionMembers("workspace-2", "channel-1", "user-1"), {
+    kind: "channel-unavailable"
+  });
   assert.deepEqual(await repository.findChannels("workspace-1", "user-1", {
     scope: "joined",
     pageSize: 10,
@@ -152,6 +196,35 @@ void test("persists channel and creator membership together and maps ids to publ
     visibility: "public"
   }, updatedAt), { kind: "channel-unavailable" });
   assert.equal(await repository.findByWorkspaceAndName("workspace-2", "general"), null);
+});
+
+void test("defaults missing preferences to all and updates only the member's channel row", async () => {
+  channels.clear();
+  memberships.clear();
+  requests.clear();
+  const repository = createChannelRepository(storage);
+  await repository.createAtomically(channel, creatorMembership);
+
+  assert.deepEqual(await repository.getNotificationPreference("workspace-1", channel.id, "user-1"), {
+    kind: "found",
+    preference: "all"
+  });
+  assert.deepEqual(await repository.getNotificationPreference("workspace-2", channel.id, "user-1"), {
+    kind: "channel-unavailable"
+  });
+  assert.deepEqual(await repository.getNotificationPreference("workspace-1", channel.id, "user-2"), {
+    kind: "channel-unavailable"
+  });
+  assert.deepEqual(await repository.setNotificationPreference("workspace-1", channel.id, "user-1", "mentions_only"), {
+    kind: "updated",
+    preference: "mentions_only"
+  });
+  assert.deepEqual(await repository.getNotificationPreference("workspace-1", channel.id, "user-1"), {
+    kind: "found",
+    preference: "mentions_only"
+  });
+  assert.equal(memberships.get(`${channel.id}:user-1`)?.notificationPreference, "mentions_only");
+  assert.equal(channels.get(channel.id)?.membershipRevision, 0);
 });
 
 void test("encodes the last channel name only when a page has more results", async () => {
@@ -179,6 +252,30 @@ void test("encodes the last channel name only when a page has more results", asy
   });
   assert.deepEqual(page.channels.map((item) => item.name), ["alpha", "beta"]);
   assert.equal(page.nextCursor, encodeChannelListCursor({ scope: "joined", name: "beta" }));
+});
+
+void test("does not list mention candidates from an archived channel", async () => {
+  channels.clear();
+  memberships.clear();
+  channels.set(channel.id, {
+    ...channel,
+    _id: channel.id,
+    lifecycleState: "archived",
+    archivedAt: new Date("2026-10-13T00:00:00.000Z"),
+    membershipRevision: 0
+  });
+  memberships.set(`${channel.id}:user-1`, {
+    _id: `${channel.id}:user-1`,
+    channelId: channel.id,
+    userId: "user-1",
+    role: "admin",
+    joinedAt: channel.createdAt
+  });
+
+  assert.deepEqual(
+    await createChannelRepository(storage).listMentionMembers("workspace-1", channel.id, "user-1"),
+    { kind: "channel-unavailable" }
+  );
 });
 
 void test("joins public channels once and leaves without deleting channel records", async () => {

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { MongoDatabase } from "../../../integrations/mongodb/index.js";
 import type { MongoTransaction } from "../../../integrations/mongodb/index.js";
+import type { ChannelNotificationPreference } from "@workspace/types";
 import type { ChannelStorage, ChannelStorageUnavailableError, ChannelWriteTransaction } from "../repositories/index.js";
 import {
   CHANNELS_COLLECTION,
@@ -92,7 +93,7 @@ const assertInitialized = async (
       throw storageUnavailable;
     }
     const indexes = await entry.readIndexes();
-      for (const expected of entry.expectedIndexes) {
+    for (const expected of entry.expectedIndexes) {
       const expectedOptions = expected.options as Readonly<{ name: string; unique: boolean; partialFilterExpression?: unknown }>;
       const actual = indexes.find((index) => index.name === expectedOptions.name);
       if (!actual || !isDeepStrictEqual(actual.key, expected.keys)
@@ -117,6 +118,59 @@ export const createMongoChannelStorage = (
     { name: CHANNEL_MEMBERSHIPS_COLLECTION, validator: CHANNEL_MEMBERSHIPS_COLLECTION_VALIDATOR, createIndex: (keys, options) => memberships.createIndex(keys as never, options as never), readIndexes: async () => memberships.indexes(), expectedIndexes: CHANNEL_MEMBERSHIPS_INDEXES },
     { name: CHANNEL_CREATION_REQUESTS_COLLECTION, validator: CHANNEL_CREATION_REQUESTS_COLLECTION_VALIDATOR, createIndex: (keys, options) => creationRequests.createIndex(keys as never, options as never), readIndexes: async () => creationRequests.indexes(), expectedIndexes: CHANNEL_CREATION_REQUESTS_INDEXES }
   ];
+  const runTransaction = async <Result>(
+    operation: (transaction: ChannelWriteTransaction) => Promise<Result>
+  ): Promise<Result> => {
+    try {
+      await assertInitialized(database, collections);
+      return await withTransaction((session) => operation(Object.freeze({
+        insertChannel: async (document): Promise<void> => { await channels.insertOne(document, { session }); },
+        insertMembership: async (document): Promise<void> => { await memberships.insertOne(document, { session }); },
+        insertCreationRequest: async (document): Promise<void> => { await creationRequests.insertOne(document, { session }); },
+        lockChannelForMembershipChange: async (workspaceId, channelId): Promise<ChannelDocument | null> => {
+          const update = await channels.updateOne(
+            { _id: channelId, workspaceId, lifecycleState: "active" },
+            { $inc: { membershipRevision: 1 } },
+            { session }
+          );
+          if (update.matchedCount === 0) return null;
+          return channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session });
+        },
+        findMembership: (channelId, userId): Promise<ChannelMembershipDocument | null> =>
+          memberships.findOne({ channelId, userId }, { session }),
+        updateMembershipNotificationPreference: async (
+          channelId,
+          userId,
+          preference
+        ): Promise<boolean> => {
+          const result = await memberships.updateOne(
+            { channelId, userId },
+            { $set: { notificationPreference: preference } },
+            { session }
+          );
+          return result.matchedCount > 0;
+        },
+        findChannel: (workspaceId, channelId): Promise<ChannelDocument | null> =>
+          channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session }),
+        updateChannelMetadata: async (workspaceId, channelId, metadata): Promise<ChannelDocument | null> => {
+          const result = await channels.updateOne(
+            { _id: channelId, workspaceId, lifecycleState: "active" },
+            { $set: metadata },
+            { session }
+          );
+          return result.matchedCount > 0
+            ? channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session })
+            : null;
+        },
+        deleteMembership: async (channelId, userId): Promise<void> => {
+          await memberships.deleteOne({ channelId, userId }, { session });
+        },
+        insertChannelMessage: async (document): Promise<void> => { await messages.insertOne(document, { session }); }
+      })));
+    } catch (error: unknown) {
+      throw toPersistenceError(error);
+    }
+  };
 
   return Object.freeze({
     initialize: async (): Promise<void> => {
@@ -125,45 +179,7 @@ export const createMongoChannelStorage = (
         for (const index of entry.expectedIndexes) await entry.createIndex(index.keys, index.options);
       }
     },
-    withTransaction: async <Result>(operation: (transaction: ChannelWriteTransaction) => Promise<Result>): Promise<Result> => {
-      try {
-        await assertInitialized(database, collections);
-        return await withTransaction((session) => operation(Object.freeze({
-          insertChannel: async (document): Promise<void> => { await channels.insertOne(document, { session }); },
-          insertMembership: async (document): Promise<void> => { await memberships.insertOne(document, { session }); },
-          insertCreationRequest: async (document): Promise<void> => { await creationRequests.insertOne(document, { session }); },
-          lockChannelForMembershipChange: async (workspaceId, channelId): Promise<ChannelDocument | null> => {
-            const update = await channels.updateOne(
-              { _id: channelId, workspaceId, lifecycleState: "active" },
-              { $inc: { membershipRevision: 1 } },
-              { session }
-            );
-            if (update.matchedCount === 0) return null;
-            return channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session });
-          },
-          findMembership: (channelId, userId): Promise<ChannelMembershipDocument | null> =>
-            memberships.findOne({ channelId, userId }, { session }),
-          findChannel: (workspaceId, channelId): Promise<ChannelDocument | null> =>
-            channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session }),
-          updateChannelMetadata: async (workspaceId, channelId, metadata): Promise<ChannelDocument | null> => {
-            const result = await channels.updateOne(
-              { _id: channelId, workspaceId, lifecycleState: "active" },
-              { $set: metadata },
-              { session }
-            );
-            return result.matchedCount > 0
-              ? channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" }, { session })
-              : null;
-          },
-          deleteMembership: async (channelId, userId): Promise<void> => {
-            await memberships.deleteOne({ channelId, userId }, { session });
-          },
-          insertChannelMessage: async (document): Promise<void> => { await messages.insertOne(document, { session }); }
-        })));
-      } catch (error: unknown) {
-        throw toPersistenceError(error);
-      }
-    },
+    withTransaction: runTransaction,
     findByWorkspaceAndName: (workspaceId, name): Promise<ChannelDocument | null> =>
       channels.findOne({ workspaceId, name, lifecycleState: "active" }),
     findById: (workspaceId, channelId): Promise<ChannelDocument | null> =>
@@ -217,6 +233,37 @@ export const createMongoChannelStorage = (
       memberships.findOne({ channelId, userId }),
     findMemberships: (channelId): Promise<readonly ChannelMembershipDocument[]> =>
       memberships.find({ channelId }).sort({ joinedAt: 1, _id: 1 }).toArray(),
+    getNotificationPreference: async (
+      workspaceId,
+      channelId,
+      userId
+    ): Promise<ChannelNotificationPreference | null> => {
+      try {
+        const channel = await channels.findOne({ _id: channelId, workspaceId, lifecycleState: "active" });
+        if (!channel) return null;
+        const membership = await memberships.findOne({ channelId, userId });
+        return membership ? membership.notificationPreference ?? "all" : null;
+      } catch (error: unknown) {
+        throw toPersistenceError(error);
+      }
+    },
+    setNotificationPreference: (
+      workspaceId,
+      channelId,
+      userId,
+      preference
+    ): Promise<ChannelNotificationPreference | null> => runTransaction(async (transaction) => {
+      const channel = await transaction.findChannel?.(workspaceId, channelId) ?? null;
+      if (!channel) return null;
+      const membership = await transaction.findMembership(channelId, userId);
+      if (!membership) return null;
+      const updated = await transaction.updateMembershipNotificationPreference(
+        channelId,
+        userId,
+        preference
+      );
+      return updated ? preference : null;
+    }),
     findCreationRequest: (workspaceId, actorId, key): Promise<ChannelCreationRequestDocument | null> =>
       creationRequests.findOne({ workspaceId, actorId, key })
   });

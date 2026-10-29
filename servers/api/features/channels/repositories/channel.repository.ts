@@ -11,6 +11,7 @@ import type {
   ChannelMembershipDocument,
   ChannelMessageDocument
 } from "../models/index.js";
+import type { ChannelNotificationPreference } from "@workspace/types";
 
 export type ChannelCreationRequest = ChannelCreationRequestDocument;
 
@@ -20,6 +21,11 @@ export type ChannelWriteTransaction = Readonly<{
   insertCreationRequest: (document: ChannelCreationRequestDocument) => Promise<void>;
   lockChannelForMembershipChange: (workspaceId: string, channelId: string) => Promise<ChannelDocument | null>;
   findMembership: (channelId: string, userId: string) => Promise<ChannelMembershipDocument | null>;
+  updateMembershipNotificationPreference: (
+    channelId: string,
+    userId: string,
+    preference: ChannelNotificationPreference
+  ) => Promise<boolean>;
   deleteMembership: (channelId: string, userId: string) => Promise<void>;
   insertChannelMessage: (document: ChannelMessageDocument) => Promise<void>;
   findChannel?: (workspaceId: string, channelId: string) => Promise<ChannelDocument | null>;
@@ -46,6 +52,14 @@ export type UpdateChannelResult =
 
 export type ChannelMembersResult =
   | Readonly<{ kind: "listed"; memberships: readonly ChannelMembership[]; canManage: boolean }>
+  | Readonly<{ kind: "channel-unavailable" }>;
+
+export type ChannelMentionMembersResult =
+  | Readonly<{ kind: "listed"; userIds: readonly string[] }>
+  | Readonly<{ kind: "channel-unavailable" }>;
+
+export type ChannelNotificationPreferenceResult =
+  | Readonly<{ kind: "found" | "updated"; preference: ChannelNotificationPreference }>
   | Readonly<{ kind: "channel-unavailable" }>;
 
 export type AddChannelMemberResult =
@@ -86,6 +100,17 @@ export type ChannelStorage = Readonly<{
   findChannels: (workspaceId: string, userId: string, query: ChannelListQuery) => Promise<readonly ChannelDocument[]>;
   findMembership: (channelId: string, userId: string) => Promise<ChannelMembershipDocument | null>;
   findMemberships: (channelId: string) => Promise<readonly ChannelMembershipDocument[]>;
+  getNotificationPreference: (
+    workspaceId: string,
+    channelId: string,
+    userId: string
+  ) => Promise<ChannelNotificationPreference | null>;
+  setNotificationPreference: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    preference: ChannelNotificationPreference
+  ) => Promise<ChannelNotificationPreference | null>;
   findCreationRequest: (workspaceId: string, actorId: string, key: string) => Promise<ChannelCreationRequestDocument | null>;
 }>;
 
@@ -101,6 +126,22 @@ export type ChannelRepository = Readonly<{
   }>>;
   findMembership: (channelId: string, userId: string) => Promise<ChannelMembership | null>;
   listMembers: (workspaceId: string, channelId: string, userId: string) => Promise<ChannelMembersResult>;
+  listMentionMembers: (
+    workspaceId: string,
+    channelId: string,
+    userId: string
+  ) => Promise<ChannelMentionMembersResult>;
+  getNotificationPreference: (
+    workspaceId: string,
+    channelId: string,
+    userId: string
+  ) => Promise<ChannelNotificationPreferenceResult>;
+  setNotificationPreference: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    preference: ChannelNotificationPreference
+  ) => Promise<ChannelNotificationPreferenceResult>;
   addMember: (workspaceId: string, channelId: string, actorId: string, targetId: string, joinedAt: Date) => Promise<AddChannelMemberResult>;
   removeMember: (workspaceId: string, channelId: string, actorId: string, targetId: string) => Promise<RemoveChannelMemberResult>;
   joinPublicChannel: (workspaceId: string, channelId: string, userId: string, joinedAt: Date) => Promise<JoinChannelResult>;
@@ -209,6 +250,32 @@ export const createChannelRepository = (storage: ChannelStorage): ChannelReposit
       memberships: Object.freeze(documents.map(toMembership)),
       canManage: viewer.role === "admin"
     });
+  },
+  listMentionMembers: async (workspaceId, channelId, userId): Promise<ChannelMentionMembersResult> => {
+    const [channel, viewer] = await Promise.all([
+      storage.findById(workspaceId, channelId),
+      storage.findMembership(channelId, userId)
+    ]);
+    if (!channel || channel.lifecycleState !== "active" || !viewer) {
+      return Object.freeze({ kind: "channel-unavailable" });
+    }
+    const memberships = await storage.findMemberships(channelId);
+    return Object.freeze({
+      kind: "listed",
+      userIds: Object.freeze(memberships.map(({ userId: memberId }) => memberId))
+    });
+  },
+  getNotificationPreference: async (workspaceId, channelId, userId) => {
+    const preference = await storage.getNotificationPreference(workspaceId, channelId, userId);
+    return preference === null
+      ? Object.freeze({ kind: "channel-unavailable" })
+      : Object.freeze({ kind: "found", preference });
+  },
+  setNotificationPreference: async (workspaceId, channelId, userId, preference) => {
+    const updated = await storage.setNotificationPreference(workspaceId, channelId, userId, preference);
+    return updated === null
+      ? Object.freeze({ kind: "channel-unavailable" })
+      : Object.freeze({ kind: "updated", preference: updated });
   },
   addMember: (workspaceId, channelId, actorId, targetId, joinedAt): Promise<AddChannelMemberResult> =>
     storage.withTransaction(async (transaction) => {

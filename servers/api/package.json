@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "build:vercel": "pnpm --filter @workspace/logging run build && esbuild server.mts --bundle --minify --platform=node --format=esm --packages=bundle --outfile=vercel/server.mjs",
     "start": "node dist/server.mjs",
-    "test": "tsx --test middleware/tests/*.test.ts integrations/mongodb/tests/*.test.ts features/health/tests/*.test.ts features/workspaces/tests/*.test.ts features/channels/tests/*.test.ts features/direct-messages/tests/*.test.ts features/message-reactions/tests/*.test.ts features/message-search/tests/*.test.ts features/notifications/tests/*.test.ts integrations/authentication/tests/*.test.ts integrations/cloudinary/tests/*.test.ts integrations/socket-io/tests/*.test.ts tests/direct-message-realtime.test.ts tests/environment.test.ts tests/http-boundaries.test.ts tests/legacy-workspace-migration.test.ts tests/mongodb.test.ts tests/shutdown.test.ts",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
     "lint": "eslint \"**/*.{ts,mts}\"",
     "typecheck": "tsc --noEmit"
   },
@@ -32,14 +32,18 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@jest/globals": "29.7.0",
     "@types/express": "^5.0.6",
+    "@types/jest": "29.5.14",
     "@types/multer": "^2.3.0",
     "@types/node": "^22.20.3",
     "@workspace/eslint-config": "workspace:*",
     "@workspace/tsconfig": "workspace:*",
     "esbuild": "0.28.2",
     "eslint": "9.39.5",
+    "jest": "29.7.0",
     "socket.io-client": "^4.8.4",
+    "ts-jest": "29.4.5",
     "tsx": "^4.23.13",
     "typescript": "5.9.3"
   },

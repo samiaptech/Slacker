@@ -121,6 +121,9 @@ void test("uses authenticated workspace role for DM global deletion while requir
     leaveChannel: () => Promise.resolve({ kind: "already-left" }),
     ensureGeneralChannel: () => Promise.resolve({ kind: "unavailable" }),
     listMembers: () => Promise.resolve({ kind: "channel-unavailable" }),
+    listMentionMembers: () => Promise.resolve({ kind: "channel-unavailable" }),
+    getNotificationPreference: () => Promise.resolve({ kind: "channel-unavailable" }),
+    setNotificationPreference: () => Promise.resolve({ kind: "channel-unavailable" }),
     inviteMember: () => Promise.resolve({ kind: "channel-unavailable" }),
     removeMember: () => Promise.resolve({ kind: "channel-unavailable" })
   };

@@ -6,11 +6,14 @@ export type {
   JoinChannelServiceResult,
   LeaveChannelServiceResult,
   ChannelMembersServiceResult,
+  ChannelMentionMembersServiceResult,
+  ChannelNotificationPreferenceServiceResult,
   InviteChannelMemberServiceResult,
   RemoveChannelMemberServiceResult,
   UpdateChannelServiceResult,
   ChannelMemberProfile,
-  ChannelMemberDetails
+  ChannelMemberDetails,
+  ChannelMentionMemberProfile
 } from "./channel.service.js";
 export { createChannelMessageService } from "./channel-message.service.js";
 export type {

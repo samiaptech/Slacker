@@ -1,10 +1,15 @@
 export { createChannelController } from "./channel.controller.js";
+export {
+  createGetChannelNotificationPreferenceController,
+  createSetChannelNotificationPreferenceController
+} from "./channel-notification-preference.controller.js";
 export { createGetChannelController } from "./channel.controller.js";
 export { createUpdateChannelController } from "./channel.controller.js";
 export { createListChannelsController } from "./channel.controller.js";
 export {
   createInviteChannelMemberController,
   createListChannelMembersController,
+  createListChannelMentionMembersController,
   createRemoveChannelMemberController
 } from "./channel.controller.js";
 export { createJoinChannelController, createLeaveChannelController } from "./channel.controller.js";
