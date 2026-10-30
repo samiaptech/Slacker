@@ -86,3 +86,48 @@ void test("rejects invalid server environment input", () => {
 void test("requires runtime values from the environment", () => {
   assert.throws(() => readApiEnvironment({}), ZodError);
 });
+
+void test("accepts a complete secure OTLP configuration and rejects partial or unsafe production settings", () => {
+  const required = {
+    NODE_ENV: "production",
+    API_HOST: "0.0.0.0",
+    API_PORT: "8080",
+    WEB_ORIGIN: "https://example.test",
+    MONGODB_URI: "mongodb://localhost:27017/workspace",
+    BETTER_AUTH_URL: "https://api.example.test",
+    BETTER_AUTH_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
+    GOOGLE_CLIENT_ID: "client-id.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    LOG_LEVEL: "warn"
+  };
+  const configured = readApiEnvironment({
+    ...required,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp-gateway.example.net/otlp",
+    OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic%20dGVzdA==",
+    OTEL_SERVICE_NAME: "teamnest-api"
+  });
+  assert.deepEqual(createApiConfig(configured).telemetry, {
+    endpoint: "https://otlp-gateway.example.net/otlp",
+    headers: "Authorization=Basic%20dGVzdA==",
+    serviceName: "teamnest-api"
+  });
+  assert.throws(() => readApiEnvironment({
+    ...required,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp-gateway.example.net/otlp"
+  }), ZodError);
+  assert.throws(() => readApiEnvironment({
+    ...required,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
+    OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic%20dGVzdA=="
+  }), ZodError);
+  assert.throws(() => readApiEnvironment({
+    ...required,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "=https://otlp-gateway.example.net/otlp",
+    OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic%20dGVzdA=="
+  }), ZodError);
+  assert.throws(() => readApiEnvironment({
+    ...required,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp-gateway.example.net/otlp",
+    OTEL_EXPORTER_OTLP_HEADERS: "Authorization=bad%0d%0aInjected"
+  }), ZodError);
+});

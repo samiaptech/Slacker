@@ -6,3 +6,6 @@ export { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-
 export type { ChannelRealtimeSocket, RealtimeConnectionStatus } from "./channel-realtime-provider";
 export { ChannelPage } from "./channel-page";
 export { ChannelWorkspace } from "./channel-workspace";
+export { ChannelMessageText } from "./channel-message-text";
+export { ChannelMentionSuggestions } from "./channel-mention-suggestions";
+export { useChannelMentions } from "./use-channel-mentions";

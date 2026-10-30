@@ -12,7 +12,14 @@ export type ChannelMessage = Readonly<{
   createdAt: Date;
   editedAt?: Date | null;
   attachments?: readonly ChatAttachmentRecord[];
+  threadRootId?: string;
+  thread?: ChannelThreadSummary | null;
   type?: "message";
+}>;
+
+export type ChannelThreadSummary = Readonly<{
+  replyCount: number;
+  lastReplyAt: Date;
 }>;
 
 export type ChannelSystemEntry = Readonly<{

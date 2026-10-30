@@ -46,7 +46,7 @@ void test("the unique index scopes canonical active names by workspace and permi
   });
 });
 
-void test("channel messages allow bounded text or attachments and preserve chronology indexing", () => {
+void test("channel messages validate thread metadata and index replies by root chronology", () => {
   assert.deepEqual(CHANNEL_MESSAGES_COLLECTION_VALIDATOR.$jsonSchema.required, [
     "_id", "channelId", "text", "createdAt"
   ]);
@@ -62,6 +62,10 @@ void test("channel messages allow bounded text or attachments and preserve chron
     {
       keys: { channelId: 1, createdAt: -1, _id: -1 },
       options: { name: "channel_messages_chronological", unique: false }
+    },
+    {
+      keys: { channelId: 1, threadRootId: 1, createdAt: -1, _id: -1 },
+      options: { name: "channel_thread_replies_chronological", unique: false }
     },
     {
       keys: { text: "text" },

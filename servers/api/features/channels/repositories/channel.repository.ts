@@ -241,8 +241,10 @@ export const createChannelRepository = (storage: ChannelStorage): ChannelReposit
     return document ? toMembership(document) : null;
   },
   listMembers: async (workspaceId, channelId, userId): Promise<ChannelMembersResult> => {
-    const channel = await storage.findById(workspaceId, channelId);
-    const viewer = await storage.findMembership(channelId, userId);
+    const [channel, viewer] = await Promise.all([
+      storage.findById(workspaceId, channelId),
+      storage.findMembership(channelId, userId)
+    ]);
     if (!channel || channel.visibility !== "private" || !viewer) return Object.freeze({ kind: "channel-unavailable" });
     const documents = await storage.findMemberships(channelId);
     return Object.freeze({

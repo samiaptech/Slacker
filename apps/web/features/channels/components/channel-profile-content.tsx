@@ -1,9 +1,9 @@
-import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import type { ReactNode } from "react";
 import { Crown, Globe2, Hash, LockKeyhole, Users } from "lucide-react";
 import { Button } from "@workspace/ui";
+import { UserAvatar } from "@/features/identity/public";
 import { Skeleton } from "@workspace/ui/primitives";
 
 export type ChannelProfileMemberView = Readonly<{
@@ -24,10 +24,8 @@ type ChannelProfileContentProps = Readonly<{
   errorMessage: string | null;
   onRetry: () => void;
   notificationSettings?: ReactNode;
+  channelActions?: ReactNode;
 }>;
-
-const getInitials = (name: string | null, email: string | null): string =>
-  (name ?? email ?? "?").trim().slice(0, 1).toUpperCase();
 
 const getChannelTitle = (channelName: string): string =>
   channelName.toLowerCase() === "general" ? "A place for all of us." : `#${channelName}`;
@@ -47,7 +45,8 @@ export const ChannelProfileContent = ({
   isLoading,
   errorMessage,
   onRetry,
-  notificationSettings
+  notificationSettings,
+  channelActions
 }: ChannelProfileContentProps) => (
   <div className="flex flex-col bg-transparent">
     <header className="border-b border-[#e6e9e2] px-5 py-4">
@@ -86,9 +85,7 @@ export const ChannelProfileContent = ({
             return (
               <li key={member.id}>
                 <Link className="group flex items-center gap-2.5 rounded-lg px-1.5 py-2 transition-colors hover:bg-[#e9eee7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={`/members/${encodeURIComponent(member.id)}` as Route}>
-                  <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#e8eee8] text-xs font-semibold text-[#486653]">
-                    {member.image ? <Image alt="" className="object-cover" height={36} src={member.image} unoptimized width={36} /> : getInitials(member.name, member.email)}
-                  </span>
+                  <UserAvatar className="size-9 shrink-0 bg-[#e8eee8] text-xs font-semibold text-[#486653]" image={member.image} name={member.name ?? member.email ?? "Workspace member"} />
                   <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-[#2e3c35]">{name}</span><span className="block truncate text-[11px] text-[#879089]">{member.title || (member.role === "admin" ? "Workspace admin" : "Member")}</span></span>
                   {member.role === "admin" ? <Crown aria-label="Workspace admin" className="size-3.5 shrink-0 text-[#a59b70]" /> : null}
                 </Link>
@@ -98,5 +95,6 @@ export const ChannelProfileContent = ({
         </ul>
       )}
     </section>
+    {channelActions}
   </div>
 );

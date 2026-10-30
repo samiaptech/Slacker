@@ -76,7 +76,8 @@ export const createNotificationControllers = ({ getIdentity, service }: Dependen
           resource: notification.resource,
           actor: notification.actor,
           createdAt: notification.createdAt.toISOString(),
-          readAt: notification.readAt?.toISOString() ?? null
+          readAt: notification.readAt?.toISOString() ?? null,
+          ...(notification.threadRootId ? { threadRootId: notification.threadRootId } : {})
         })),
         nextCursor: result.nextCursor
       });

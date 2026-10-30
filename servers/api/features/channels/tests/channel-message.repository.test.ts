@@ -112,3 +112,48 @@ void test("pages through equal-timestamp messages without gaps or duplicates", a
   assert.deepEqual(allReceived.slice().sort(), messages.map(({ _id }) => _id).sort());
   assert.equal(new Set(allReceived).size, messages.length);
 });
+
+void test("maps thread replies in chronological pages and preserves the root summary", async () => {
+  const lastReplyAt = new Date("2026-10-15T12:02:00.000Z");
+  const root: ChannelMessageDocument = {
+    _id: "root-1",
+    channelId: "channel-1",
+    senderId: "user-1",
+    text: "question",
+    createdAt,
+    threadReplyCount: 2,
+    threadLastReplyAt: lastReplyAt
+  };
+  const replies: readonly ChannelMessageDocument[] = [
+    { _id: "reply-2", channelId: "channel-1", senderId: "user-2", text: "second", createdAt: lastReplyAt, threadRootId: "root-1" },
+    { _id: "reply-1", channelId: "channel-1", senderId: "user-2", text: "first", createdAt, threadRootId: "root-1" }
+  ];
+  const newestReply = replies[0];
+  if (!newestReply) throw new Error("The test thread requires a newest reply.");
+  const repository = createChannelMessageRepository({
+    initialize: () => Promise.resolve(),
+    findForMember: () => Promise.resolve({ kind: "listed", messages: [] }),
+    createForMember: () => Promise.resolve("created"),
+    findThreadForMember: () => Promise.resolve({ kind: "listed", root, replies }),
+    createThreadReplyForMember: () => Promise.resolve({
+      kind: "created",
+      reply: newestReply,
+      thread: { replyCount: 2, lastReplyAt }
+    }),
+    editForMember: () => Promise.resolve({ kind: "not-found" }),
+    deleteForMember: () => Promise.resolve({ kind: "not-found" })
+  });
+
+  const findThreadForMember = repository.findThreadForMember;
+  if (!findThreadForMember) throw new Error("Thread repository is not configured.");
+  const page = await findThreadForMember(
+    "workspace-1", "channel-1", "user-1", "root-1", { pageSize: 1, before: null }
+  );
+  assert.equal(page.kind, "listed");
+  assert.deepEqual(page.root.thread, { replyCount: 2, lastReplyAt });
+  const firstReply = page.replies[0];
+  assert.ok(firstReply);
+  assert.equal(firstReply.id, "reply-2");
+  assert.equal(firstReply.threadRootId, "root-1");
+  assert.equal(page.nextCursor, encodeChannelMessageCursor({ createdAt: lastReplyAt, id: "reply-2" }));
+});

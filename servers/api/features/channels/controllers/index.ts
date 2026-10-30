@@ -19,7 +19,9 @@ export {
   createEditChannelMessageController,
   createDownloadChannelAttachmentController,
   createListChannelMessagesController,
-  createSendChannelMessageController
+  createListChannelThreadRepliesController,
+  createSendChannelMessageController,
+  createSendChannelThreadReplyController
 } from "./channel-message.controller.js";
 export { createToggleChannelMessageReactionController } from "./channel-message.controller.js";
 export type {

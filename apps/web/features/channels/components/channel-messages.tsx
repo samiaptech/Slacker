@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
-import { FileText, Paperclip, Pin, Send, X } from "lucide-react";
-import type { ChannelMessageResponse, MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
+import { AtSign, FileText, Paperclip, Pin, Send, X } from "lucide-react";
+import type { ChannelMessageResponse, MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse, RealtimeServerEvents } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
 import {
   channelMessageListResponseSchema,
@@ -18,6 +18,7 @@ import { ChannelMessageItem } from "./channel-message-item";
 import { ChannelMentionSuggestions } from "./channel-mention-suggestions";
 import { useChannelMentions } from "./use-channel-mentions";
 import { ChannelSystemMessageItem } from "./channel-system-message-item";
+import { ChannelThreadPanel } from "./channel-thread-panel";
 import {
   captureHistoryScrollAnchor,
   restoreHistoryScrollAnchor,
@@ -100,7 +101,12 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const { registerRefreshHandler } = useChannelMessageRefresh();
   const realtimeSocketRef = useRef(realtime.socket);
   const [messages, setMessages] = useState<readonly ChannelTimelineMessage[]>([]);
+  const messagesRef = useRef(messages);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [focusThreadReplyId, setFocusThreadReplyId] = useState<string | null>(null);
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
+  const loadedHistoryChannelRef = useRef<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<readonly File[]>([]);
@@ -138,6 +144,31 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   const typingUsersTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const isTypingRef = useRef(false);
   const shouldScrollToBottom = useRef(true);
+  const updateThreadSummary = useCallback((rootId: string, thread: NonNullable<ChannelMessageView["thread"]>): void => {
+    setMessages((current) => current.map((message) =>
+      isPendingChannelMessage(message) && message.id === rootId ? { ...message, thread } : message
+    ));
+  }, []);
+  const openThread = useCallback((rootMessageId: string, replyMessageId: string | null = null): void => {
+    const root = messagesRef.current.find((entry): entry is MessageWithDelivery<ChannelMessageView> =>
+      isPendingChannelMessage(entry) && entry.id === rootMessageId
+    );
+    if (root?.threadRootId) return;
+    setOpenThreadId(rootMessageId);
+    setFocusThreadReplyId(replyMessageId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("thread", rootMessageId);
+    if (replyMessageId) url.searchParams.set("message", replyMessageId);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+  const closeThread = useCallback((): void => {
+    setOpenThreadId(null);
+    setFocusThreadReplyId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("thread");
+    url.searchParams.delete("message");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   const getEditableMessage = useCallback((messageId: string): ChannelMessageView | undefined =>
     messages.find((entry): entry is MessageWithDelivery<ChannelMessageView> =>
       isPendingChannelMessage(entry) && entry.id === messageId
@@ -188,7 +219,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     let active = true;
     const loadMessages = async (): Promise<void> => {
       historyAnchorRef.current = null;
-      setIsLoading(true);
+      if (loadedHistoryChannelRef.current !== channelId) setIsLoading(true);
       setLoadError(null);
       setAccessRevoked(false);
       try {
@@ -224,6 +255,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
         ));
         setNextCursor(parsed.data.nextCursor);
         setLoadedChannelId(channelId);
+        loadedHistoryChannelRef.current = channelId;
         shouldScrollToBottom.current = true;
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -259,6 +291,10 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       shouldScrollToBottom.current = true;
       setMessages((current) => mergeIncomingMessages(current, [message]));
     };
+    const onThreadReply = (event: Parameters<RealtimeServerEvents["channel:thread:reply:new"]>[0]): void => {
+      if (event.channelId !== channelId) return;
+      updateThreadSummary(event.rootMessageId, event.thread);
+    };
     const onMessageUpdated = (message: ChannelMessageResponse): void => {
       const parsed = channelMessageResponseSchema.safeParse(message);
       if (!parsed.success || parsed.data.channelId !== channelId) return;
@@ -272,6 +308,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     const onMessageDeleted = (change: Readonly<{ channelId: string; messageId: string }>): void => {
       if (change.channelId !== channelId) return;
       setMessages((current) => current.filter((message) => message.id !== change.messageId));
+      if (change.messageId === openThreadId) closeThread();
     };
     const onMessageReactions = (change: Readonly<{ channelId: string } & MessageReactionToggleResponse>): void => {
       if (change.channelId !== channelId) return;
@@ -312,6 +349,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     };
     socket.on("channel:ready", onChannelReady);
     socket.on("channel:message:new", onMessage);
+    socket.on("channel:thread:reply:new", onThreadReply);
     socket.on("channel:message:updated", onMessageUpdated);
     socket.on("channel:system:new", onSystemMessage);
     socket.on("channel:message:deleted", onMessageDeleted);
@@ -323,6 +361,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     return () => {
       socket.off("channel:ready", onChannelReady);
       socket.off("channel:message:new", onMessage);
+      socket.off("channel:thread:reply:new", onThreadReply);
       socket.off("channel:message:updated", onMessageUpdated);
       socket.off("channel:system:new", onSystemMessage);
       socket.off("channel:message:deleted", onMessageDeleted);
@@ -336,7 +375,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
       typingUserTimeouts.clear();
       setTypingUsers([]);
     };
-  }, [activeWorkspace.id, channelId, realtime.socket, realtime.workspaceReady, receiveRealtimeUpdate, revokeAccess]);
+  }, [activeWorkspace.id, channelId, closeThread, openThreadId, realtime.socket, realtime.workspaceReady, receiveRealtimeUpdate, revokeAccess, updateThreadSummary]);
 
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
@@ -640,8 +679,13 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
     isLoadingOlder,
     hasMore: nextCursor !== null,
     olderError,
-    loadOlder: loadOlderMessages
+    loadOlder: loadOlderMessages,
+    onOpenThread: openThread
   });
+
+  const activeThreadRoot = messages.find((entry): entry is MessageWithDelivery<ChannelMessageView> =>
+    isPendingChannelMessage(entry) && entry.id === openThreadId && !entry.threadRootId
+  );
 
   const updateTyping = (text: string): void => {
     const socket = realtime.socket;
@@ -687,6 +731,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
   });
 
   return (
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
     <section aria-label="Channel conversation" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf8]">
       <p aria-live="polite" className="sr-only" role="status">{searchJump.announcement}</p>
       {channelName.toLocaleLowerCase() === "general" ? (
@@ -755,6 +800,7 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
                     onEditChange={messageEdit.setDraft}
                     onSaveEdit={() => { void messageEdit.saveEdit(message.id); }}
                     onToggleReaction={(emoji) => { void toggleReaction(message.id, emoji); }}
+                    onOpenThread={() => openThread(message.id)}
                     loadImagePreview={loadImagePreview}
                     startsNewDay={startsNewDay}
                   />
@@ -790,6 +836,9 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
             <div className="flex items-end gap-2 rounded-2xl border border-input bg-background p-2 shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
               <Button aria-label="Attach files, up to 5 files and 10 MB each" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={() => attachmentInputRef.current?.click()} size="icon" title="Up to 5 files · 10 MB each" type="button" variant="ghost">
                 <Paperclip aria-hidden="true" className="size-4" />
+              </Button>
+              <Button aria-label="Mention a channel member" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || isLoading || Boolean(loadError)} onClick={mentions.open} onMouseDown={(event) => event.preventDefault()} size="icon" title="Mention a member" type="button" variant="ghost">
+                <AtSign aria-hidden="true" className="size-4" />
               </Button>
               <div className="relative min-w-0 flex-1">
               {mentions.range ? (
@@ -844,5 +893,24 @@ export const ChannelMessages = ({ apiBaseUrl, channelId, channelName, channelDes
         )}
       </div>
     </section>
+    {openThreadId ? (
+      <ChannelThreadPanel
+        apiBaseUrl={apiBaseUrl}
+        canSend={canSend && !accessRevoked}
+        canDeleteForEveryone={activeWorkspace.role === "admin"}
+        channelId={channelId}
+        onClose={closeThread}
+        onSummary={updateThreadSummary}
+        rootId={openThreadId}
+        focusReplyId={focusThreadReplyId}
+        {...(activeThreadRoot ? { initialRoot: activeThreadRoot } : {})}
+        key={openThreadId}
+        socket={realtime.socket}
+        user={{ id: currentUser.id, name: currentUser.name, email: currentUser.email, image: currentUser.image }}
+        workspaceId={activeWorkspace.id}
+        onRootDeleted={() => setMessages((current) => current.filter((message) => message.id !== openThreadId))}
+      />
+    ) : null}
+    </div>
   );
 };

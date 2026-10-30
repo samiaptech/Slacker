@@ -18,6 +18,7 @@ export type {
 export { createChannelMessageService } from "./channel-message.service.js";
 export type {
   ChannelMessagePageResult,
+  ChannelThreadPageResult,
   ChannelMessageService,
   ChannelMessageSender,
   ChannelMessageWithSender,

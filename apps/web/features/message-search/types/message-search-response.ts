@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const messageSearchResultSchema = z.object({
   id: z.string().min(1),
+  threadRootId: z.string().min(1).nullable().optional(),
   snippet: z.string().max(182),
   createdAt: z.string().datetime(),
   sender: z.object({

@@ -28,6 +28,7 @@ const createStorage = (): NotificationStorage => {
   return {
     initialize: () => Promise.resolve(),
     createForChannel: () => Promise.resolve([]),
+    createForChannelThreadReply: () => Promise.resolve([]),
     createForDirectMessage: () => Promise.resolve([]),
     listForUser: (userId) => Promise.resolve(records.filter(({ recipientId }) => recipientId === userId)),
     unreadCount: (userId) => Promise.resolve(records.filter(({ recipientId, readAt }) =>
@@ -39,6 +40,7 @@ const createStorage = (): NotificationStorage => {
       return Promise.resolve(true);
     },
     markResourceRead: () => Promise.resolve(0),
+    markThreadRead: () => Promise.resolve(0),
     findCursor: (userId, id) => Promise.resolve(records.find(({ recipientId, _id }) =>
       recipientId === userId && _id === id) ?? null)
   };

@@ -36,6 +36,7 @@ type IndexedSearchMessage = Readonly<{
   text: string;
   createdAt: Date;
   score: number;
+  threadRootId?: string;
 }>;
 
 const unavailable = Object.assign(new Error("Message search storage is unavailable."), {
@@ -119,7 +120,7 @@ export const createMongoMessageSearchStorage = (database: MongoDatabase): Messag
               hiddenForUserIds: { $nin: [userId] }
             }, {
               projection: {
-                _id: 1, channelId: 1, senderId: 1, text: 1, createdAt: 1,
+                _id: 1, channelId: 1, senderId: 1, text: 1, createdAt: 1, threadRootId: 1,
                 score: { $meta: "textScore" }
               },
               maxTimeMS: MESSAGE_SEARCH_TIMEOUT_MS
@@ -149,6 +150,7 @@ export const createMongoMessageSearchStorage = (database: MongoDatabase): Messag
               text: message.text,
               createdAt: message.createdAt,
               score: message.score,
+              ...(message.threadRootId ? { threadRootId: message.threadRootId } : {}),
               conversation: Object.freeze({ type: "channel" as const, id: channelId, name })
             }] : [];
           }),

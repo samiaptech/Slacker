@@ -150,8 +150,10 @@ export const createWorkspaceService = ({
     try {
       const membership = await repository.findMembership(workspaceId, identity.id);
       if (!membership) return Object.freeze({ kind: "denied" });
-      const memberships = await repository.listForWorkspace(workspaceId);
-      const workspace = await repository.findWorkspace(workspaceId);
+      const [memberships, workspace] = await Promise.all([
+        repository.listForWorkspace(workspaceId),
+        repository.findWorkspace(workspaceId)
+      ]);
       if (!workspace) return Object.freeze({ kind: "denied" });
       const users = await findUsersByIds(memberships.map((entry) => entry.userId));
       const usersById = new Map(users.map((user) => [user.id, user]));

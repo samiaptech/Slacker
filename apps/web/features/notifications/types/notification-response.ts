@@ -8,13 +8,14 @@ import type {
 const notificationTypes = [
   "channel_message",
   "direct_message",
+  "channel_thread_reply",
   "mention",
   "channel_member_joined",
   "channel_member_left",
   "channel_updated"
 ] as const satisfies readonly NotificationType[];
 
-export const notificationResponseSchema = z.object({
+const notificationObjectSchema = z.object({
   id: z.string().min(1),
   eventId: z.string().min(1),
   type: z.enum(notificationTypes),
@@ -25,8 +26,14 @@ export const notificationResponseSchema = z.object({
   }).strict(),
   actor: z.object({ id: z.string().min(1), name: z.string().min(1) }).strict(),
   createdAt: z.iso.datetime(),
-  readAt: z.iso.datetime().nullable()
-}).strict() satisfies z.ZodType<NotificationResponse>;
+  readAt: z.iso.datetime().nullable(),
+  threadRootId: z.string().min(1).optional()
+}).strict();
+
+export const notificationResponseSchema = notificationObjectSchema.transform((notification): NotificationResponse => {
+  const { threadRootId, ...base } = notification;
+  return threadRootId ? { ...base, threadRootId } : base;
+}) satisfies z.ZodType<NotificationResponse>;
 
 export const notificationListResponseSchema = z.object({
   notifications: z.array(notificationResponseSchema),
@@ -34,7 +41,9 @@ export const notificationListResponseSchema = z.object({
 }).strict() satisfies z.ZodType<NotificationListResponse>;
 
 export const notificationEventSchema = z.object({
-  notification: notificationResponseSchema.extend({ recipientId: z.string().min(1) })
+  notification: notificationObjectSchema.extend({ recipientId: z.string().min(1) }).transform(({ recipientId, threadRootId, ...base }) =>
+    threadRootId ? { ...base, threadRootId, recipientId } : { ...base, recipientId }
+  )
 }).strict();
 
 export const notificationUnreadCountSchema = z.object({

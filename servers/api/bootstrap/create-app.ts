@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type RequestHandler } from "express";
 import { createHttpLogger, type Logger } from "@workspace/logging";
 import type { ApiConfig } from "../types/index.js";
 import { apiRuntime } from "../constants/index.js";
@@ -17,8 +17,9 @@ import { createHealthRoutes } from "../features/health/index.js";
 import { createWorkspaceRoutes } from "../features/workspaces/index.js";
 import { createMessageSearchRoutes, type MessageSearchService } from "../features/message-search/index.js";
 import { createNotificationRoutes, type NotificationService } from "../features/notifications/index.js";
+import { createProfileImageRoutes } from "../features/profile-images/index.js";
 import type { AuthenticationIntegration } from "../integrations/index.js";
-import type { ChatAttachmentIntegration } from "../integrations/index.js";
+import type { ChatAttachmentIntegration, ProfileImageStorage } from "../integrations/index.js";
 import type { SharedRateLimiter } from "../integrations/mongodb/index.js";
 import type { WorkspaceService } from "../features/workspaces/index.js";
 import {
@@ -37,6 +38,8 @@ type AppDependencies = Readonly<{
   trustVercelForwardedFor: boolean;
   authentication: AuthenticationIntegration;
   attachmentStorage?: ChatAttachmentIntegration;
+  profileImageStorage?: ProfileImageStorage;
+  apiTelemetryMiddleware?: RequestHandler;
   channelService: ChannelService;
   channelMessageService: ChannelMessageService;
   channelRealtime?: ChannelRealtimePublisher;
@@ -55,6 +58,8 @@ export const createApp = ({
   trustVercelForwardedFor,
   authentication,
   attachmentStorage,
+  profileImageStorage,
+  apiTelemetryMiddleware,
   channelService,
   channelMessageService,
   channelRealtime,
@@ -66,6 +71,7 @@ export const createApp = ({
 }: AppDependencies): Express => {
   const app = appInstance;
   app.disable("x-powered-by");
+  if (apiTelemetryMiddleware) app.use(apiTelemetryMiddleware);
   app.use(createHttpLogger({
     logger,
     format: config.environment === "production" ? "combined" : "dev",
@@ -84,6 +90,10 @@ export const createApp = ({
   const featureRouters = [createHealthRoutes({
     environment: config.environment,
     serviceName: apiRuntime.serviceName
+  }), createProfileImageRoutes({
+    getIdentity: authentication.getIdentity,
+    updateUserImage: authentication.updateUserImage,
+    ...(profileImageStorage ? { storage: profileImageStorage } : {})
   }), createWorkspaceRoutes({
     service: workspaceService,
     getIdentity: authentication.getIdentity,

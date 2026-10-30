@@ -15,6 +15,8 @@ export const ERROR_MESSAGES = Object.freeze({
   directMessageUnavailable: "The direct conversation is unavailable or you do not have access.",
   directMessageStorageUnavailable: "Direct message storage is temporarily unavailable.",
   chatAttachmentStorageUnavailable: "Chat attachment storage is temporarily unavailable.",
+  profileImageStorageUnavailable: "Profile image storage is temporarily unavailable.",
+  profileImageUpdateFailed: "The profile image could not be saved.",
   messageDeleteForbidden: "Only the message author or a workspace administrator can delete for everyone.",
   messageDeleteCleanupFailed: "The message was deleted, but one or more attached files could not be cleaned up.",
   messageEditForbidden: "Only the message author can edit this message.",

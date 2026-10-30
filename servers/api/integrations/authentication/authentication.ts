@@ -19,6 +19,7 @@ export type AuthenticationIdentity = Readonly<{
 export type AuthenticationIntegration = Readonly<{
   handler: RequestHandler;
   getIdentity: (headers: IncomingHttpHeaders) => Promise<AuthenticationIdentity | null>;
+  updateUserImage: (headers: IncomingHttpHeaders, image: string) => Promise<void>;
   findUserByEmail: (email: string) => Promise<AuthenticationIdentity | null>;
   findUsersByIds: (userIds: readonly string[]) => Promise<readonly AuthenticationIdentity[]>;
 }>;
@@ -83,6 +84,12 @@ export const createAuthenticationIntegration = ({ config, database }: Authentica
         title: session.user.title ?? null,
         email: session.user.email,
         image: session.user.image ?? null
+      });
+    },
+    updateUserImage: async (headers, image): Promise<void> => {
+      await auth.api.updateUser({
+        headers: fromNodeHeaders(headers),
+        body: { image }
       });
     },
     findUserByEmail: async (email): Promise<AuthenticationIdentity | null> => {

@@ -38,6 +38,7 @@ const authentication: AuthenticationIntegration = {
     : headers["x-test-identity"] === "other-member"
       ? otherMemberIdentity
       : headers["x-test-identity"] === "outside" ? outsideIdentity : null),
+  updateUserImage: () => Promise.resolve(),
   findUserByEmail: (email) => Promise.resolve(email === otherMemberIdentity.email ? otherMemberIdentity : null),
   findUsersByIds: (userIds) => Promise.resolve(
     [memberIdentity, otherMemberIdentity].filter((identity) => userIds.includes(identity.id))
@@ -716,14 +717,34 @@ void test("lists and sends channel messages with current workspace authorization
         ? { kind: "listed" as const, messages: [channelMessage], nextCursor: null }
         : { kind: "channel-unavailable" as const }
     ),
-    send: (workspaceId, channelId, userId, text) => {
+    send: (workspaceId, channelId, userId, text, _files, _profile, threadRootId) => {
       sendCount += 1;
       return Promise.resolve(
         workspaceId === "workspace-configured" && channelId === "channel-1" && userId === memberIdentity.id
-          ? { kind: "sent" as const, message: { ...channelMessage, text, senderId: userId, sender: { ...channelMessage.sender, id: userId } } }
+          ? threadRootId
+            ? {
+              kind: "sent" as const,
+              message: {
+                ...channelMessage,
+                id: "reply-1",
+                text,
+                senderId: userId,
+                threadRootId,
+                thread: null,
+                sender: { ...channelMessage.sender, id: userId }
+              },
+              thread: { replyCount: 1, lastReplyAt: channelMessage.createdAt }
+            }
+            : { kind: "sent" as const, message: { ...channelMessage, text, senderId: userId, sender: { ...channelMessage.sender, id: userId } } }
           : { kind: "channel-unavailable" as const }
       );
     },
+    listThread: (_workspaceId, _channelId, _userId, rootMessageId) => Promise.resolve({
+      kind: "listed" as const,
+      root: { ...channelMessage, id: rootMessageId, thread: null },
+      replies: [],
+      nextCursor: null
+    }),
     getAttachment: () => Promise.resolve({ kind: "not-found" }),
     delete: () => Promise.resolve({ kind: "not-found" }),
     toggleReaction: () => Promise.resolve({ kind: "not-found" }),
@@ -858,8 +879,32 @@ void test("lists and sends channel messages with current workspace authorization
       text: "Hello, channel!",
       createdAt: channelMessage.createdAt.toISOString(),
       sender: { id: memberIdentity.id, name: memberIdentity.name, image: null },
-      reactions: []
+      reactions: [],
+      threadRootId: null,
+      thread: null
     }],
+    nextCursor: null
+  });
+
+  const threadPath = `${url}/channel-1/messages/message-1/replies`;
+  const thread = await fetch(threadPath, {
+    headers: { ...workspaceHeaders, "x-test-identity": "member" }
+  });
+  assert.equal(thread.status, 200);
+  assert.deepEqual(await thread.json(), {
+    root: {
+      id: "message-1",
+      channelId: "channel-1",
+      senderId: memberIdentity.id,
+      type: "message",
+      text: "Hello, channel!",
+      createdAt: channelMessage.createdAt.toISOString(),
+      sender: { id: memberIdentity.id, name: memberIdentity.name, image: null },
+      reactions: [],
+      threadRootId: null,
+      thread: null
+    },
+    replies: [],
     nextCursor: null
   });
 
@@ -883,6 +928,32 @@ void test("lists and sends channel messages with current workspace authorization
   assert.equal(sentBody.sender.id, memberIdentity.id);
   assert.equal(sentBody.text, "Hello");
   assert.equal(sendCount, 1);
+
+  const replyResponse = await fetch(threadPath, {
+    method: "POST",
+    headers: { ...workspaceHeaders, "content-type": "application/json", "x-test-identity": "member" },
+    body: JSON.stringify({ text: "Reply" })
+  });
+  assert.equal(replyResponse.status, 201);
+  assert.deepEqual(await replyResponse.json(), {
+    reply: {
+      id: "reply-1",
+      channelId: "channel-1",
+      senderId: memberIdentity.id,
+      type: "message",
+      text: "Reply",
+      createdAt: channelMessage.createdAt.toISOString(),
+      sender: { id: memberIdentity.id, name: memberIdentity.name, image: null },
+      reactions: [],
+      threadRootId: "message-1",
+      thread: null
+    },
+    thread: {
+      replyCount: 1,
+      lastReplyAt: channelMessage.createdAt.toISOString()
+    }
+  });
+  assert.equal(sendCount, 2);
 
   const unavailable = await fetch(`${url}/channel-1/messages`, {
     headers: { ...workspaceHeaders, "x-test-identity": "outside" }

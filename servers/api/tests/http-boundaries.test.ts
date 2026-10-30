@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer as createHttpServer } from "node:http";
 import type { Logger } from "@workspace/logging";
 import { createApp, createServer } from "../bootstrap/index.js";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../constants/index.js";
 import { summarizeMongoValidationError } from "../middleware/errors.js";
-import type { AuthenticationIntegration } from "../integrations/index.js";
+import { createOpenTelemetryIntegration, type AuthenticationIntegration } from "../integrations/index.js";
 import type { ApiConfig } from "../types/index.js";
 import type { ChannelMessageService } from "../features/channels/index.js";
 import { createWorkspaceServiceFixture } from "./workspace-service-fixture.js";
@@ -31,6 +32,7 @@ const workspaceService = createWorkspaceServiceFixture().service;
 const authentication: AuthenticationIntegration = {
   handler: (_request, _response, next): void => { next(); },
   getIdentity: () => Promise.resolve(null),
+  updateUserImage: () => Promise.resolve(),
   findUserByEmail: () => Promise.resolve(null),
   findUsersByIds: () => Promise.resolve([])
 };
@@ -57,6 +59,71 @@ const channelMessageService: ChannelMessageService = {
   toggleReaction: () => Promise.resolve({ kind: "not-found" }),
   edit: () => Promise.resolve({ kind: "not-found" })
 };
+
+void test("exports HTTP request metrics from the API app through the configured OTLP exporter", async (context) => {
+  const exports: Readonly<{ path: string; payload: Buffer }>[] = [];
+  const receiver = createHttpServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      exports.push({
+        path: request.url ?? "",
+        payload: Buffer.concat(chunks)
+      });
+      response.writeHead(200).end();
+    });
+  });
+  receiver.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => receiver.once("listening", resolve));
+  const receiverAddress = receiver.address();
+  assert.ok(receiverAddress && typeof receiverAddress === "object");
+
+  const telemetry = createOpenTelemetryIntegration({
+    endpoint: `http://127.0.0.1:${String(receiverAddress.port)}/otlp`,
+    headers: "Authorization=Bearer%20test-token",
+    serviceName: "test-api"
+  }, logger);
+  if (!telemetry.middleware) throw new Error("Configured API telemetry middleware is missing.");
+  const app = createApp({
+    config,
+    logger,
+    rateLimiter: allowApiRateLimit,
+    trustVercelForwardedFor: false,
+    authentication,
+    apiTelemetryMiddleware: telemetry.middleware,
+    channelService,
+    channelMessageService,
+    workspaceService
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const serverAddress = server.address();
+  assert.ok(serverAddress && typeof serverAddress === "object");
+  let telemetryStopped = false;
+
+  context.after(async () => {
+    if (!telemetryStopped) await telemetry.shutdown();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      receiver.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  });
+
+  assert.equal((await fetch(`http://127.0.0.1:${String(serverAddress.port)}/health`)).status, 200);
+  await telemetry.shutdown();
+  telemetryStopped = true;
+  const metricExport = exports.find(({ path }) => path === "/otlp/v1/metrics");
+  assert.ok(metricExport);
+  assert.ok(metricExport.payload.includes(Buffer.from("teamnest.http.requests")));
+});
 
 void test("unknown routes use the API error boundary", async (context) => {
   const server = createServer({ app: createApp({ config, logger, rateLimiter: allowApiRateLimit, trustVercelForwardedFor: false, authentication, channelService, channelMessageService, workspaceService }), config, logger });

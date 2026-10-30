@@ -1,9 +1,9 @@
 import type { ReactElement } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { BadgeCheck, CalendarDays, Mail, ShieldCheck, UserRound } from "lucide-react";
 import { Button } from "@workspace/ui";
+import { UserAvatar } from "./user-avatar";
 import type { WorkspaceMemberProfileView } from "../types";
 
 type WorkspaceMemberProfileCardProps = Readonly<{
@@ -16,7 +16,6 @@ const formatJoinDate = (value: string): string =>
 
 export const WorkspaceMemberProfileCard = ({ member, isCurrentUser }: WorkspaceMemberProfileCardProps): ReactElement => {
   const displayName = member.name ?? "Workspace member";
-  const initials = (member.name ?? member.email ?? "?").trim().slice(0, 1).toUpperCase();
 
   return (
     <section aria-label={`${displayName} profile`} className="overflow-hidden rounded-3xl border border-[#e3e9e3] bg-white shadow-sm shadow-[#173b3a]/5">
@@ -24,11 +23,7 @@ export const WorkspaceMemberProfileCard = ({ member, isCurrentUser }: WorkspaceM
         <div aria-hidden="true" className="absolute -right-10 -top-24 -z-10 size-64 rounded-full border-[30px] border-white/[0.05]" />
         <div aria-hidden="true" className="absolute -bottom-24 right-24 -z-10 size-48 rounded-full bg-[#b8e3d1]/10 blur-2xl" />
         <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
-          <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/20 bg-[#b8e3d1] text-3xl font-semibold text-[#173b3a] shadow-lg shadow-black/10">
-            {member.image
-              ? <Image alt={`${displayName} profile photo`} className="size-full object-cover" height={96} src={member.image} unoptimized width={96} />
-              : initials}
-          </div>
+          <UserAvatar className="size-24 shrink-0 rounded-[1.75rem] border border-white/20 bg-[#b8e3d1] text-3xl font-semibold text-[#173b3a] shadow-lg shadow-black/10" image={member.image} name={displayName} />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b8e3d1]">Workspace profile</p>
             <h1 className="mt-2 break-words text-3xl font-semibold tracking-tight" id="member-profile-title">{displayName}</h1>

@@ -1,3 +1,40 @@
+# Profile image upload
+
+`POST /profile/image` lets any signed-in Better Auth user add or replace their own profile
+picture. It is an account setting and does not require a workspace header or an administrator
+role. Send one multipart file in the `file` field:
+
+```http
+POST /profile/image
+Content-Type: multipart/form-data
+
+file=<image>
+```
+
+The endpoint accepts JPEG (`.jpg`/`.jpeg`), PNG (`.png`), and WebP (`.webp`) files up to
+5 MiB. The server checks the filename extension, declared MIME type, and file signature
+before upload. It stores a public, HTTPS Cloudinary image URL in the signed-in Better Auth
+user's `image` field and returns `200 { "image": "https://res.cloudinary.com/..." }`. The
+URL contains no provider credentials and can be used by existing member-profile surfaces.
+Cloudinary uploads use generated asset IDs and never use the supplied filename as a public
+asset identifier.
+
+Responses use `Cache-Control: no-store`. Stable failures are:
+
+- `401 unauthenticated` when there is no valid Better Auth session.
+- `400 validation_error` for a missing file, unexpected multipart field/count, unsupported
+  image type, or invalid file signature; `error.details.reason` identifies the cause.
+- `413 validation_error` with `error.details.reason: "file_too_large"` above 5 MiB.
+- `503 profile_image_storage_unavailable` when Cloudinary is not configured or unavailable.
+- `500 profile_image_update_failed` if Better Auth cannot persist the uploaded image; the
+  new Cloudinary asset is cleaned up when possible.
+
+No MongoDB migration or initializer is required: the endpoint updates the existing Better
+Auth user `image` field. Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
+`CLOUDINARY_API_SECRET` for uploads. The web application's current Content Security Policy
+allows `self`, data/blob images, and Google profile images but not Cloudinary; the frontend
+must allow `https://res.cloudinary.com` in `img-src` before these URLs render in-browser.
+
 # API request limits
 
 Every request that proceeds past the existing CORS middleware—including `/health`,
@@ -138,6 +175,13 @@ none of those notifications, including mentions. Direct-message notifications ar
 Existing notifications are retained and are not reclassified when a preference changes;
 the setting applies to notifications created after the change. Memberships without the
 optional preference field (including legacy records) default to `all`.
+
+Channel threads create `channel_thread_reply` notifications for current thread
+participants and explicitly mentioned current channel members. Thread notifications carry
+`threadRootId` alongside the channel resource so clients can deep-link to the thread. They
+respect the same per-channel preference as messages; opening the channel history marks
+channel-level notifications read, while opening a thread marks only that thread's reply
+notifications read.
 
 `GET /notifications?limit=30&before=<cursor>` returns the caller's newest notifications,
 across workspaces, with a maximum page size of 100:

@@ -3,7 +3,8 @@ import {
   type ChannelMessage,
   type ChannelHistoryEntry,
   type ChannelMessageDeleteScope,
-  type ChannelMessagePageQuery
+  type ChannelMessagePageQuery,
+  type ChannelThreadSummary
 } from "../domain/index.js";
 import type { ChannelMessageDocument } from "../models/index.js";
 import type { ChatAttachmentRecord } from "../../../types/chat/index.js";
@@ -32,6 +33,19 @@ export type ChannelMessageEditStorageResult =
 export type ChannelMessageEditResult = Exclude<ChannelMessageEditStorageResult, { kind: "updated" }> |
   Readonly<{ kind: "updated"; message: ChannelMessage; reactions: readonly StoredMessageReaction[] }>;
 
+export type ChannelThreadStorageResult =
+  | Readonly<{ kind: "listed"; root: ChannelMessageDocument; replies: readonly ChannelMessageDocument[] }>
+  | Readonly<{ kind: "channel-unavailable" }>;
+
+export type ChannelThreadReplyStorageResult =
+  | Readonly<{ kind: "created"; reply: ChannelMessageDocument; thread: ChannelThreadSummary }>
+  | Readonly<{ kind: "channel-unavailable" }>
+  | Readonly<{ kind: "root-not-found" }>;
+export type ChannelThreadReplyResult =
+  | Readonly<{ kind: "created"; reply: ChannelMessage; thread: ChannelThreadSummary }>
+  | Readonly<{ kind: "channel-unavailable" }>
+  | Readonly<{ kind: "root-not-found" }>;
+
 export type ChannelMessageStorage = Readonly<{
   initialize: () => Promise<void>;
   findForMember: (
@@ -46,6 +60,20 @@ export type ChannelMessageStorage = Readonly<{
     userId: string,
     message: ChannelMessageDocument
   ) => Promise<"created" | "channel-unavailable">;
+  findThreadForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    rootMessageId: string,
+    query: ChannelMessagePageQuery
+  ) => Promise<ChannelThreadStorageResult>;
+  createThreadReplyForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    rootMessageId: string,
+    reply: ChannelMessageDocument
+  ) => Promise<ChannelThreadReplyStorageResult>;
   editForMember: (
     workspaceId: string,
     channelId: string,
@@ -100,6 +128,25 @@ export type ChannelMessageRepository = Readonly<{
     userId: string,
     message: ChannelMessage
   ) => Promise<"created" | "channel-unavailable">;
+  findThreadForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    rootMessageId: string,
+    query: ChannelMessagePageQuery
+  ) => Promise<Readonly<{
+    kind: "listed";
+    root: ChannelMessage;
+    replies: readonly ChannelMessage[];
+    nextCursor: string | null;
+  }> | Readonly<{ kind: "channel-unavailable" }>>;
+  createThreadReplyForMember?: (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    rootMessageId: string,
+    reply: ChannelMessage
+  ) => Promise<ChannelThreadReplyResult>;
   editForMember: (
     workspaceId: string,
     channelId: string,
@@ -135,11 +182,27 @@ const toChannelMessage = (document: ChannelMessageDocument): ChannelHistoryEntry
     senderId: document.senderId,
     text: document.text,
     createdAt: document.createdAt,
+    ...(document.threadRootId
+      ? { threadRootId: document.threadRootId, thread: null }
+      : {
+        thread: document.threadReplyCount && document.threadLastReplyAt
+          ? Object.freeze({
+            replyCount: document.threadReplyCount,
+            lastReplyAt: document.threadLastReplyAt
+          })
+          : null
+      }),
     ...(document.editedAt !== undefined ? { editedAt: document.editedAt } : {}),
     ...(document.attachments && document.attachments.length > 0
       ? { attachments: document.attachments }
       : {})
   });
+};
+
+const toThreadMessage = (document: ChannelMessageDocument): ChannelMessage => {
+  const message = toChannelMessage(document);
+  if (!("senderId" in message)) throw new Error("A channel thread message is missing its sender.");
+  return message;
 };
 
 const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => Object.freeze({
@@ -149,6 +212,7 @@ const toMessageDocument = (message: ChannelMessage): ChannelMessageDocument => O
   text: message.text,
   createdAt: message.createdAt,
   ...(message.editedAt !== undefined ? { editedAt: message.editedAt } : {}),
+  ...(message.threadRootId ? { threadRootId: message.threadRootId } : {}),
   type: "message",
   ...(message.attachments && message.attachments.length > 0
     ? { attachments: message.attachments }
@@ -174,6 +238,41 @@ export const createChannelMessageRepository = (storage: ChannelMessageStorage): 
   },
   createForMember: (workspaceId, channelId, userId, message) =>
     storage.createForMember(workspaceId, channelId, userId, toMessageDocument(message)),
+  findThreadForMember: async (workspaceId, channelId, userId, rootMessageId, query) => {
+    if (!storage.findThreadForMember) return Object.freeze({ kind: "channel-unavailable" as const });
+    const result = await storage.findThreadForMember(
+      workspaceId, channelId, userId, rootMessageId, query
+    );
+    if (result.kind !== "listed") return result;
+    const hasMore = result.replies.length > query.pageSize;
+    const pageNewestFirst = result.replies.slice(0, query.pageSize);
+    const replies = Object.freeze(pageNewestFirst.map(toThreadMessage).reverse());
+    const root = toThreadMessage(result.root);
+    const oldest = replies[0];
+    return Object.freeze({
+      kind: "listed",
+      root,
+      replies,
+      nextCursor: hasMore && oldest
+        ? encodeChannelMessageCursor({ createdAt: oldest.createdAt, id: oldest.id })
+        : null
+    });
+  },
+  createThreadReplyForMember: async (workspaceId, channelId, userId, rootMessageId, reply) => {
+    if (!storage.createThreadReplyForMember) {
+      return Object.freeze({ kind: "channel-unavailable" as const });
+    }
+    const result = await storage.createThreadReplyForMember(
+      workspaceId, channelId, userId, rootMessageId, toMessageDocument(reply)
+    );
+    return result.kind === "created"
+      ? Object.freeze({
+        kind: "created" as const,
+        reply: toThreadMessage(result.reply),
+        thread: result.thread
+      })
+      : result;
+  },
   editForMember: async (...args) => {
     const result = await storage.editForMember(...args);
     if (result.kind !== "updated") return result;

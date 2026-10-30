@@ -11,7 +11,11 @@ export type WorkspaceContextValue = Readonly<{
   leaveWorkspace: () => Promise<void>;
   startCreatingWorkspace: () => void;
   signOut: () => Promise<void>;
-  setCurrentUserProfile: (profile: Readonly<{ name: string; title: string | null }>) => void;
+  setCurrentUserProfile: (profile: Readonly<{
+    name?: string;
+    title?: string | null;
+    image?: string | null;
+  }>) => void;
 }>;
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

@@ -7,6 +7,7 @@ import { createNotificationService } from "../service.js";
 const createHarness = () => {
   const documents: NotificationDocument[] = [];
   const events: Readonly<Record<string, unknown>>[] = [];
+  const threadReplyEvents: Readonly<Record<string, unknown>>[] = [];
   const storage: NotificationStorage = {
     initialize: () => Promise.resolve(),
     createForChannel: (event, mentionedUserIds) => {
@@ -26,12 +27,32 @@ const createHarness = () => {
           actorId: event.actor.id,
           actorName: event.actor.name,
           createdAt: event.createdAt,
-          readAt: null
+          readAt: null,
+          ...(event.threadRootId ? { threadRootId: event.threadRootId } : {})
         });
         documents.push(item);
         created.push(item);
       }
       return Promise.resolve(Object.freeze(created));
+    },
+    createForChannelThreadReply: (event, rootMessageId, mentionedUserIds) => {
+      threadReplyEvents.push({ event, rootMessageId, mentionedUserIds });
+      const item: NotificationDocument = {
+        _id: `${event.eventId}:participant`,
+        eventId: event.eventId,
+        recipientId: "participant",
+        workspaceId: event.workspaceId,
+        type: "channel_thread_reply",
+        resourceType: "channel",
+        resourceId: event.resource.id,
+        actorId: event.actor.id,
+        actorName: event.actor.name,
+        createdAt: event.createdAt,
+        readAt: null,
+        threadRootId: rootMessageId
+      };
+      documents.push(item);
+      return Promise.resolve([item]);
     },
     createForDirectMessage: (event) => {
       const recipientId = event.actor.id === "actor-1" ? "dm-recipient" : "actor-1";
@@ -72,6 +93,18 @@ const createHarness = () => {
       }
       return Promise.resolve(count);
     },
+    markThreadRead: (userId, channelId, rootMessageId, readAt) => {
+      let count = 0;
+      for (const [index, item] of documents.entries()) {
+        if (item.recipientId === userId && item.resourceType === "channel"
+          && item.resourceId === channelId && item.threadRootId === rootMessageId
+          && item.readAt === null) {
+          documents[index] = Object.freeze({ ...item, readAt });
+          count += 1;
+        }
+      }
+      return Promise.resolve(count);
+    },
     findCursor: (userId, notificationId) => Promise.resolve(documents.find((item) =>
       item._id === notificationId && item.recipientId === userId) ?? null)
   };
@@ -84,7 +117,7 @@ const createHarness = () => {
       publishUnreadCount: (userId, unreadCount) => { events.push({ kind: "count", userId, unreadCount }); }
     }
   });
-  return { service, documents, events };
+  return { service, documents, events, threadReplyEvents };
 };
 
 void test("persists channel notifications once, upgrades explicit mentions, and suppresses the actor", async () => {
@@ -138,6 +171,33 @@ void test("creates channel activity notifications for remaining members without 
     actor: { id: "actor-1", name: "Actor" },
     eventId: "departure-1",
     createdAt: new Date("2026-10-26T09:00:00.000Z")
+  });
+
+  void test("creates thread reply notification events with the root ID and stable reply event ID", async () => {
+    const { service, documents, threadReplyEvents } = createHarness();
+    await service.notifyChannelThreadReply({
+      workspaceId: "workspace-1",
+      channelId: "channel-1",
+      rootMessageId: "root-1",
+      messageId: "reply-1",
+      actor: { id: "actor-1", name: "Actor" },
+      text: "answer @[member-2]",
+      createdAt: new Date("2026-10-26T09:00:00.000Z")
+    });
+    assert.deepEqual(threadReplyEvents[0], {
+      event: {
+        eventId: "reply-1",
+        workspaceId: "workspace-1",
+        resource: { type: "channel", id: "channel-1" },
+        type: "channel_thread_reply",
+        actor: { id: "actor-1", name: "Actor" },
+        createdAt: new Date("2026-10-26T09:00:00.000Z"),
+        threadRootId: "root-1"
+      },
+      rootMessageId: "root-1",
+      mentionedUserIds: ["member-2"]
+    });
+    assert.equal(documents[0]?.threadRootId, "root-1");
   });
   assert.deepEqual(documents.map(({ recipientId, type }) => [recipientId, type]), [
     ["mention-1", "channel_member_left"],

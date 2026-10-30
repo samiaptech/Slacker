@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
 import type { NotificationResponse } from "@workspace/types";
 import { application } from "@/constants/application";
+import { fetchSharedGet } from "@/app/fetch-shared-get";
 import { Activity, ChevronDown, Hash, LogOut, MessageCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, UserRound, Users } from "lucide-react";
 import {
   Button,
@@ -32,6 +32,7 @@ import { ChannelCreateDialog } from "./create-channel-dialog";
 import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { ChannelRealtimeProvider, useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelProfileToggleProvider, useChannelProfileToggle } from "./channel-profile-toggle-context";
+import { ChannelLeaveProvider, type ChannelLeaveTarget } from "./channel-leave-context";
 import { ChannelMessageRefreshProvider, useChannelMessageRefresh } from "./channel-message-refresh-context";
 import { useAppVisualViewport } from "./use-app-visual-viewport";
 import { NotificationCenter, useNotifications } from "@/features/notifications/public";
@@ -40,11 +41,10 @@ import type { DirectConversationView } from "@/features/direct-messages/public";
 import {
   channelJoinResponseSchema,
   channelListResponseSchema,
-  type ChannelListResponseView,
-  type ChannelResponseView
+  type ChannelListResponseView
 } from "../types";
 import { useWorkspaceContext, WorkspaceLeaveDialog, WorkspaceLeaveMenuItem } from "@/features/workspace-foundation/public";
-import { workspaceMembersSchema, type WorkspaceMembersView } from "@/features/identity/public";
+import { UserAvatar, workspaceMembersSchema, type WorkspaceMembersView } from "@/features/identity/public";
 
 type ChannelWorkspaceProps = Readonly<{
   apiBaseUrl: string;
@@ -75,7 +75,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
   const [pageErrorMessage, setPageErrorMessage] = useState<string | null>(null);
   const [membershipActionId, setMembershipActionId] = useState<string | null>(null);
   const [membershipErrorMessage, setMembershipErrorMessage] = useState<string | null>(null);
-  const [channelToLeave, setChannelToLeave] = useState<ChannelResponseView | null>(null);
+  const [channelToLeave, setChannelToLeave] = useState<ChannelLeaveTarget | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMembersView["members"]>([]);
   const [isLoadingMembers, setIsLoadingMembers] = useState(true);
@@ -138,7 +138,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
       setDirectMessagesLoading(true);
       setDirectMessagesError(null);
       try {
-        const response = await fetch(new URL("/direct-messages", apiBaseUrl), {
+        const response = await fetchSharedGet(new URL("/direct-messages", apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           headers: { "X-Workspace-Id": activeWorkspace.id },
@@ -178,7 +178,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
       try {
         const url = new URL("/channels", apiBaseUrl);
         url.searchParams.set("scope", scope);
-        const response = await fetch(url, {
+        const response = await fetchSharedGet(url, {
           credentials: "include",
           cache: "no-store",
           headers: { "X-Workspace-Id": activeWorkspace.id },
@@ -222,7 +222,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
       setMembersErrorMessage(null);
       setWorkspaceMembers([]);
       try {
-        const response = await fetch(new URL("/workspace/members", apiBaseUrl), {
+        const response = await fetchSharedGet(new URL("/workspace/members", apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           headers: { "X-Workspace-Id": activeWorkspace.id },
@@ -343,13 +343,19 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
       }
       setChannelToLeave(null);
       setReloadToken((current) => current + 1);
-      if (pathname === `/channels/${encodeURIComponent(channel.id)}`) router.push("/" as Route);
+      const channelPath = `/channels/${encodeURIComponent(channel.id)}`;
+      if (pathname === channelPath || pathname === `${channelPath}/about`) router.push("/" as Route);
     } catch {
       setMembershipErrorMessage("The channel could not be left. Check your connection and try again.");
     } finally {
       setMembershipActionId(null);
     }
   };
+
+  const requestLeaveChannel = useCallback((channel: ChannelLeaveTarget): void => {
+    setMembershipErrorMessage(null);
+    setChannelToLeave(channel);
+  }, []);
 
   const openDirectMessage = async (recipientId: string): Promise<void> => {
     if (openingDirectMessageFor) return;
@@ -401,7 +407,10 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
     const target = notification.resource.type === "channel"
       ? `/channels/${encodeURIComponent(notification.resource.id)}`
       : `/messages/${encodeURIComponent(notification.resource.id)}`;
-    router.push(target as Route);
+    const threadTarget = notification.threadRootId
+      ? `${target}?thread=${encodeURIComponent(notification.threadRootId)}`
+      : target;
+    router.push(threadTarget as Route);
     return true;
   };
 
@@ -444,7 +453,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
           </div>
         </TooltipProvider>
         <Link aria-label="Open your profile" className="workspace-rail-profile" href="/profile">
-          {(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}
+          <UserAvatar className="size-full rounded-full bg-[#b8e3d1] text-sm font-semibold text-[#173b3a]" image={currentUser.image} name={currentUser.name || currentUser.email} />
         </Link>
       </aside>
       <aside
@@ -549,11 +558,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                         setIsMobileSidebarOpen(false);
                       }}
                     >
-                      <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-[11px] font-semibold text-[#c8e8d8]">
-                        {conversation.otherParticipant.image
-                          ? <Image alt="" className="size-full object-cover" height={28} src={conversation.otherParticipant.image} unoptimized width={28} />
-                          : conversation.otherParticipant.name.trim().slice(0, 1).toUpperCase()}
-                      </span>
+                      <UserAvatar className="size-7 shrink-0 rounded-lg bg-white/10 text-[11px] font-semibold text-[#c8e8d8]" image={conversation.otherParticipant.image} name={conversation.otherParticipant.name} />
                       <span className="truncate">{conversation.otherParticipant.name}</span>
                       {notificationInbox.isUnread({ type: "direct_message", id: conversation.id }) ? (
                         <>
@@ -740,6 +745,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
                       }`}
                       title={realtime.onlineUserIds.includes(member.id) ? "Online" : "Offline"}
                     />
+                    <UserAvatar className="size-8 shrink-0 rounded-full bg-white/10 text-xs font-semibold text-[#c8e8d8]" image={member.id === currentUser.id ? currentUser.image : member.image} name={member.name ?? "Workspace member"} />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{member.name ?? "Workspace member"}</span>
                       {member.title ? <span className="block truncate text-xs text-white/45">{member.title}</span> : null}
@@ -767,7 +773,7 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
         </section>
         <div className="workspace-sidebar-profile mt-auto border-t border-white/10 p-3">
           <Link aria-current={pathname === "/profile" ? "page" : undefined} className={`flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors ${pathname === "/profile" ? "bg-white/12" : "hover:bg-white/[0.07]"}`} href="/profile" onClick={() => setIsMobileSidebarOpen(false)}>
-            <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#b8e3d1] text-sm font-semibold text-[#173b3a]">{(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}</span>
+            <UserAvatar className="size-9 shrink-0 rounded-full bg-[#b8e3d1] text-sm font-semibold text-[#173b3a]" image={currentUser.image} name={currentUser.name || currentUser.email} />
             <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-white">{currentUser.name || "Your profile"}</span><span className="block truncate text-xs text-white/50">{activeWorkspace.role === "admin" ? "Workspace admin" : "Workspace member"}</span></span>
             <UserRound aria-hidden="true" className="size-4 text-white/50" />
           </Link>
@@ -840,9 +846,11 @@ const ChannelWorkspaceContent = ({ apiBaseUrl, children }: ChannelWorkspaceProps
             unreadCount={notificationInbox.unreadCount}
             workspaces={workspaces}
           />
-          <Link aria-label="Open your profile" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#d8ebe2] text-sm font-semibold text-[#244b43]" href="/profile" onClick={() => setIsMobileSidebarOpen(false)}>{(currentUser.name || currentUser.email).trim().slice(0, 1).toUpperCase()}</Link>
+          <Link aria-label="Open your profile" className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#d8ebe2] text-sm font-semibold text-[#244b43]" href="/profile" onClick={() => setIsMobileSidebarOpen(false)}><UserAvatar className="size-full rounded-full bg-[#d8ebe2] text-sm font-semibold text-[#244b43]" image={currentUser.image} name={currentUser.name || currentUser.email} /></Link>
         </header>
-        <div className={`flex min-h-0 flex-1 flex-col ${pathname === "/profile" || pathname.startsWith("/members/") ? "overflow-y-auto p-4 sm:p-6" : "overflow-hidden"}`}>{children}</div>
+        <div className={`flex min-h-0 flex-1 flex-col ${pathname === "/profile" || pathname.startsWith("/members/") ? "overflow-y-auto p-4 sm:p-6" : "overflow-hidden"}`}>
+          <ChannelLeaveProvider onRequestLeave={requestLeaveChannel}>{children}</ChannelLeaveProvider>
+        </div>
       </section>
       </div>
       <WorkspaceSearchDialog

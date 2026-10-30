@@ -102,15 +102,40 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-28.
+Updated: 2026-10-30.
 
-- **Suggested next chat features:** Emoji reactions, author-only message editing, and
-  per-member channel notification controls with All / Mentions only / Muted behavior are
-  implemented; next consider private saved messages with navigation back to the source
-  conversation. Threads/replies are the broadest change; plan them separately
-  across persistence, history, notifications, unread state, realtime, and mobile UX, with an
-  explicit decision on one-level threading and whether replies also appear in the main
-  channel. Reorder if threads are the primary user need.
+- **Grafana observability (P0 metrics slice):** The API exports opt-in HTTP request count,
+  duration, route/status labels, and Socket.IO connection lifecycle, bounded event-category,
+  and unexpected handler-failure metrics to Grafana Cloud over OTLP/HTTP. The combined
+  overview dashboard has ten real HTTP/realtime panels; business events, MongoDB health,
+  runtime metrics, logs, and traces remain future phases. API tests pass (189 passed, 2
+  optional MongoDB tests skipped), typecheck, focused ESLint, API build, Vercel bundle build,
+  dashboard JSON, and high-severity dependency audit pass (10 low/moderate advisories remain).
+  Malformed OTLP endpoint URLs now return a Zod configuration error instead of throwing
+  `ERR_INVALID_URL`; regression test, API typecheck, and focused lint pass.
+  HTTP metrics were missing because `telemetry.middleware` was supplied to channel-message
+  service construction instead of `createApp`; it is now mounted by the API app. Added an
+  app-to-exporter regression test. API typecheck and focused lint pass; the test could not
+  run in this sandbox because loopback TCP is denied (`EACCES`), so live Grafana visibility
+  remains unverified.
+  Temporary HTTP/export diagnostic logs have been removed. The HTTP instrumentation test
+  still verifies counter and duration measurements directly; loopback-to-exporter verification
+  and Grafana ingestion remain unavailable in the sandbox.
+  Backend latency follow-up batches all direct-message list participant profile reads into
+  one query, parallelizes authorized workspace roster/workspace reads, runs channel sender
+  profile and reaction queries concurrently, and parallelizes channel membership-page
+  authorization reads. Targeted backend tests pass (32), API typecheck, focused ESLint, and
+  diff check pass. These changes reduce avoidable database round trips; no live response
+  timings were measured and sub-300ms is not guaranteed without profiling the configured
+  database and network.
+  `pnpm run check` still fails on existing profile-image route-export and web feature-boundary
+  findings. No Grafana credentials/account connection, deployment, commit, or push was made.
+  The observability README now documents every metric, its unit/attributes, and dashboard
+  limits. Full `git diff --check` flags trailing tabs in generated Vercel dependency string
+  tables; they were preserved because changing embedded data risks altering bundle behavior.
+  Operator: configure endpoint/header as deployment secrets and import the dashboard.
+  Backend: add business/MongoDB metrics only after definitions and supported measurements
+  are confirmed; add logs/traces after the metrics pipeline is reliable.
 - **Ownership:** Codex handles frontend design and interactions; the backend agent handles
   APIs, contracts, persistence, authorization, and backend validation. Coordinate changes
   to shared contracts explicitly.
@@ -444,7 +469,8 @@ Updated: 2026-10-28.
   redeploy the API, then verify shared limits against the configured MongoDB.
 
 - **Web/API security headers:** The web `proxy.ts` creates a per-request nonce CSP with
-  same-origin scripts, API/realtime connection origins, and Google profile image support;
+  same-origin scripts, API/realtime connection origins, Google profile images, and Cloudinary
+  profile photos;
   `unsafe-eval` is development-only, and `unsafe-inline` is limited to style attributes
   needed by existing UI components. API responses set restrictive CSP, `nosniff`, frame,
   referrer, and same-origin resource policies, including errors and CORS preflights.
@@ -595,3 +621,31 @@ Updated: 2026-10-28.
   types typecheck/lint/build, repository architecture validation, and `git diff --check`
   passed. No live MongoDB migration, production test, or deployment ran; changes are
   uncommitted in the shared checkout.
+
+- **Channel threads:** Implemented one-level channel replies, excluded from main history,
+  with paginated history and JSON/multipart reply sends. Replies update root counts/latest
+  reply timestamps, broadcast `channel:thread:reply:new`, cascade on root deletion, and carry
+  `threadRootId` through search, notifications, and thread-specific read behavior. The web
+  thread panel supports pagination, files, realtime reconciliation, edits, deletes, reactions,
+  optimistic sends with retry, and search/notification navigation to the root and matching
+  reply. Replies stay out of the main timeline. Before deployment, run `pnpm run initialize`
+  against the intended database. Full `pnpm run validate` passed, including 192 API tests
+  (2 optional MongoDB tests skipped), web tests, typechecks, lint, and builds; `pnpm run scan`
+  reported clean. No live MongoDB migration, populated-browser test, or deployment ran.
+
+- **Profile image upload — backend and frontend:** Added authenticated `POST /profile/image` with
+  multipart `file`, available to any signed-in user without workspace-role checks. JPEG, PNG,
+  and WebP are signature/MIME/extension-checked and limited to 5 MiB. Success returns
+  `{ "image": "<HTTPS Cloudinary URL>" }` and persists it through Better Auth; failures use
+  stable 401, 400, 413, 503, and 500 API errors. No schema migration is required. Focused API
+  tests (9), API typecheck/lint, shared-types typecheck/lint, and `git diff --check` pass. No
+  live Cloudinary test ran. Frontend now has a validated upload control with local preview,
+  success/failure states, and immediate workspace-context update. Own avatars appear in the rail,
+  sidebar, and workspace member list; member profiles, channel/DM rows, channel members, and DM
+  list display their image when available through shared `UserAvatar` with initials fallback. The
+  CSP now allows only the exact Cloudinary image host `res.cloudinary.com`. Web typecheck, focused
+  ESLint, and `git diff --check` pass; populated-browser upload/visual verification remains
+  pending. Included in the coordinated frontend/backend change set; no deployment was
+  performed. Backend owner
+  follow-up: emit existing `workspace:members:changed` after profile-image updates so already-open
+  member lists on other clients refresh immediately.

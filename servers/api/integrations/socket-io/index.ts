@@ -6,4 +6,4 @@ export {
   SOCKET_EVENTS_PER_USER_PER_SECOND_LIMIT,
   SOCKET_MAX_PAYLOAD_BYTES
 } from "./socket-io.js";
-export type { AuthenticatedSocketData, SocketIoApi, SocketIoLimits } from "./socket-io.js";
+export type { AuthenticatedSocketData, SocketIoApi, SocketIoLimits, SocketIoTelemetry } from "./socket-io.js";

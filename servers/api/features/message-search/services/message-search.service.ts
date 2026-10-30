@@ -87,6 +87,9 @@ export const createMessageSearchService = ({
             });
           return Object.freeze({
             id: candidate.id,
+            ...(candidate.conversation.type === "channel"
+              ? { threadRootId: candidate.threadRootId ?? null }
+              : { threadRootId: null }),
             snippet: createMessageSnippet(candidate.text, query),
             createdAt: candidate.createdAt.toISOString(),
             sender: Object.freeze({

@@ -1,7 +1,8 @@
 import { memo, type ReactElement } from "react";
-import Image from "next/image";
-import { FileText } from "lucide-react";
+import { FileText, MessageCircle } from "lucide-react";
+import { Button } from "@workspace/ui";
 import { ChannelMessageText } from "./channel-message-text";
+import { UserAvatar } from "@/features/identity/public";
 import type { MessageReactionEmoji } from "@workspace/types";
 import {
   MessageActions,
@@ -44,6 +45,7 @@ type ChannelMessageItemProps = Readonly<{
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onToggleReaction: (emoji: MessageReactionEmoji) => void;
+  onOpenThread: () => void;
 }>;
 
 const formatMessageTime = (value: string): string =>
@@ -51,9 +53,6 @@ const formatMessageTime = (value: string): string =>
 
 const formatMessageDay = (value: string): string =>
   new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date(value));
-
-const getInitials = (name: string): string =>
-  name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?";
 
 const formatFileSize = (size: number): string => size < 1024 * 1024
   ? `${Math.max(1, Math.round(size / 1024))} KB`
@@ -85,7 +84,8 @@ const ChannelMessageItemView = ({
   onEditChange,
   onCancelEdit,
   onSaveEdit,
-  onToggleReaction
+  onToggleReaction,
+  onOpenThread
 }: ChannelMessageItemProps): ReactElement => (
   <>
     {startsNewDay ? (
@@ -96,11 +96,7 @@ const ChannelMessageItemView = ({
       </li>
     ) : null}
     <li className="group flex items-start gap-3" data-message-id={message.id}>
-      <div aria-hidden="true" className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-xs font-semibold text-primary">
-        {message.sender.image
-          ? <Image alt="" className="object-cover" height={36} src={message.sender.image} unoptimized width={36} />
-          : getInitials(message.sender.name)}
-      </div>
+      <UserAvatar className="mt-0.5 size-9 shrink-0 bg-primary/10 text-xs font-semibold text-primary" image={message.sender.image} name={message.sender.name} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
@@ -130,8 +126,9 @@ const ChannelMessageItemView = ({
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <ChannelMessageText memberNames={mentionNames} text={message.text} />
             {!deliveryState ? <MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /> : null}
+            {!deliveryState ? <ThreadButton count={message.thread?.replyCount ?? 0} onClick={onOpenThread} /> : null}
           </div>
-        ) : !deliveryState ? <div className="mt-1"><MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /></div> : null}
+        ) : !deliveryState ? <div className="mt-1 flex items-center gap-2"><MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /><ThreadButton count={message.thread?.replyCount ?? 0} onClick={onOpenThread} /></div> : null}
         {pendingFiles.length > 0 ? (
           <ul aria-label="Pending attachments" className="mt-3 flex flex-wrap gap-2">
             {pendingFiles.map((file, index) => (
@@ -158,3 +155,10 @@ const ChannelMessageItemView = ({
 );
 
 export const ChannelMessageItem = memo(ChannelMessageItemView);
+
+const ThreadButton = ({ count, onClick }: Readonly<{ count: number; onClick: () => void }>): ReactElement => (
+  <Button aria-label={count ? `${count} replies. Reply in thread` : "Reply in thread"} className="h-6 gap-1 rounded-full px-2 text-[11px] text-muted-foreground hover:text-foreground" onClick={onClick} size="sm" type="button" variant="ghost">
+    <MessageCircle aria-hidden="true" className="size-3.5" />
+    {count ? <span>{count}</span> : null}
+  </Button>
+);

@@ -19,11 +19,13 @@ import {
   createRemoveChannelMemberController,
   createListChannelsController,
   createListChannelMessagesController,
+  createListChannelThreadRepliesController,
   createDeleteChannelMessageController,
   createEditChannelMessageController,
   createToggleChannelMessageReactionController,
   createAuthorizeChannelMessageUploadController,
   createSendChannelMessageController,
+  createSendChannelThreadReplyController,
   createDownloadChannelAttachmentController,
   type ChannelWorkspaceAccessResult,
   type ChannelMemberEmailVisibilityResult,
@@ -119,6 +121,16 @@ export const createChannelRoutes = (dependencies: ChannelRouteDependencies): Rou
     createAuthorizeChannelMessageUploadController(messageDependencies),
     parseMessageAttachments,
     createSendChannelMessageController(messageDependencies)
+  );
+  router.get(
+    "/channels/:channelId/messages/:messageId/replies",
+    createListChannelThreadRepliesController(messageDependencies)
+  );
+  router.post(
+    "/channels/:channelId/messages/:messageId/replies",
+    createAuthorizeChannelMessageUploadController(messageDependencies),
+    parseMessageAttachments,
+    createSendChannelThreadReplyController(messageDependencies)
   );
   router.delete(
     "/channels/:channelId/messages/:messageId",

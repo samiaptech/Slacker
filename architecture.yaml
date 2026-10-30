@@ -231,7 +231,7 @@
     { "project": "web", "root": "features/channels", "categories": ["components", "public", "types"], "rootExports": ["components", "public", "types"] },
     { "project": "web", "root": "features/direct-messages", "categories": ["components", "public", "types"], "rootExports": ["components", "public", "types"] },
     { "project": "web", "root": "types", "categories": ["configuration", "routing"], "rootExports": ["configuration", "routing"] },
-    { "project": "api", "root": "integrations", "categories": ["authentication", "cloudinary", "mongodb", "socket-io"], "rootExports": ["authentication", "cloudinary", "mongodb", "socket-io"] },
+    { "project": "api", "root": "integrations", "categories": ["authentication", "cloudinary", "mongodb", "opentelemetry", "socket-io"], "rootExports": ["authentication", "cloudinary", "mongodb", "opentelemetry", "socket-io"] },
     { "project": "api", "root": "constants", "categories": ["errors", "http", "runtime"], "rootExports": ["errors", "http", "runtime"] },
     { "project": "api", "root": "types", "categories": ["chat", "configuration"], "rootExports": ["chat", "configuration"] },
     { "project": "api", "root": "features/health", "categories": ["controllers", "routes", "services"], "rootExports": ["routes"] },

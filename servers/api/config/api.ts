@@ -17,5 +17,12 @@ export const createApiConfig = (environment: ValidatedApiEnvironment): ApiConfig
       apiKey: environment.CLOUDINARY_API_KEY,
       apiSecret: environment.CLOUDINARY_API_SECRET
     }) }
+    : {}),
+  ...(environment.OTEL_EXPORTER_OTLP_ENDPOINT && environment.OTEL_EXPORTER_OTLP_HEADERS
+    ? { telemetry: Object.freeze({
+      endpoint: environment.OTEL_EXPORTER_OTLP_ENDPOINT,
+      headers: environment.OTEL_EXPORTER_OTLP_HEADERS,
+      serviceName: environment.OTEL_SERVICE_NAME ?? "teamnest-api"
+    }) }
     : {})
 });

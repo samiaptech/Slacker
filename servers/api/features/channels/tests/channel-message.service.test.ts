@@ -79,6 +79,64 @@ void test("reads only through the member-authorized repository and resolves priv
   });
 });
 
+void test("loads channel sender profiles while message reactions are being fetched", async () => {
+  let reactionLookupStarted = false;
+  let resolveProfiles: ((profiles: readonly Readonly<{
+    id: string;
+    name: string;
+    image: string | null;
+  }>[]) => void) | undefined;
+  const { service } = createService({
+    listReactionsForMember: () => {
+      reactionLookupStarted = true;
+      return Promise.resolve([]);
+    }
+  }, (ids) => ids.length === 0
+    ? Promise.resolve([])
+    : new Promise((resolve) => {
+      resolveProfiles = resolve;
+    }));
+  const resultPromise = service.list("workspace-1", "channel-1", "user-1", {
+    pageSize: 20,
+    before: null
+  });
+  await Promise.resolve();
+
+  assert.ok(reactionLookupStarted);
+  assert.ok(resolveProfiles);
+  resolveProfiles([{ id: "user-1", name: "Channel Member", image: null }]);
+  assert.equal((await resultPromise).kind, "listed");
+});
+
+void test("lists a thread with its parent and reply authors", async () => {
+  const reply: ChannelMessage = {
+    ...message,
+    id: "reply-1",
+    senderId: "user-2",
+    text: "an answer",
+    threadRootId: message.id,
+    thread: null
+  };
+  const { service } = createService({
+    findThreadForMember: () => Promise.resolve({
+      kind: "listed",
+      root: { ...message, thread: { replyCount: 1, lastReplyAt: reply.createdAt } },
+      replies: [reply],
+      nextCursor: null
+    })
+  });
+  const result = await service.listThread(
+    "workspace-1", "channel-1", "user-1", message.id, { pageSize: 20, before: null }
+  );
+  assert.equal(result.kind, "listed");
+  assert.equal(result.root.thread?.replyCount, 1);
+  assert.deepEqual(result.replies[0]?.sender, {
+    id: "user-2",
+    name: "Former member",
+    image: null
+  });
+});
+
 void test("uses a deliberate fallback when an author's profile is no longer available", async () => {
   const { service } = createService({
     findForMember: () => Promise.resolve({ kind: "listed", messages: [message], nextCursor: null })
@@ -109,6 +167,37 @@ void test("uses the authenticated sender profile without a post-persistence prof
   const { service } = createService({}, () => {
     profileLookups += 1;
     return Promise.resolve([]);
+  });
+
+  void test("creates a reply against the supplied root without inserting it into channel history", async () => {
+    const reply = { ...message, id: "reply-1", threadRootId: "root-1", thread: null };
+    const calls: unknown[] = [];
+    const lastReplyAt = new Date("2026-10-15T12:01:00.000Z");
+    const { service } = createService({
+      createThreadReplyForMember: (workspaceId, channelId, userId, rootMessageId, record) => {
+        calls.push({ workspaceId, channelId, userId, rootMessageId, record });
+        return Promise.resolve({
+          kind: "created",
+          reply,
+          thread: { replyCount: 1, lastReplyAt }
+        });
+      }
+    });
+
+    const result = await service.send(
+      "workspace-1",
+      "channel-1",
+      "user-1",
+      "reply text",
+      [],
+      { name: "Channel Member", image: null },
+      "root-1"
+    );
+    assert.equal(result.kind, "sent");
+    assert.equal(result.message.threadRootId, "root-1");
+    assert.deepEqual(result.thread, { replyCount: 1, lastReplyAt });
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0] as { rootMessageId: string }).rootMessageId, "root-1");
   });
 
   const result = await service.send(

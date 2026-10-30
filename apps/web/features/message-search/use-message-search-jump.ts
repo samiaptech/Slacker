@@ -18,6 +18,7 @@ type MessageSearchJumpOptions = Readonly<{
   hasMore: boolean;
   olderError: string | null;
   loadOlder: () => Promise<void>;
+  onOpenThread?: (rootMessageId: string, replyMessageId: string | null) => void;
 }>;
 
 export const useMessageSearchJump = ({
@@ -29,7 +30,8 @@ export const useMessageSearchJump = ({
   isLoadingOlder,
   hasMore,
   olderError,
-  loadOlder
+  loadOlder,
+  onOpenThread
 }: MessageSearchJumpOptions) => {
   const [targetMessageId, setTargetMessageId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -51,17 +53,20 @@ export const useMessageSearchJump = ({
       const url = new URL(window.location.href);
       const routeConversationId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
       if (routeConversationId !== conversationId) return;
-      const storedMessageId = takeMessageSearchTarget(type, conversationId);
+      const storedTarget = takeMessageSearchTarget(type, conversationId);
       const urlMessageId = url.searchParams.get("message");
-      const messageId = storedMessageId ?? urlMessageId;
-      if (!messageId) return;
+      const threadId = url.searchParams.get("thread");
+      const targetRootId = storedTarget?.threadRootId ?? threadId;
+      const messageId = storedTarget?.messageId ?? urlMessageId;
+      if (targetRootId) onOpenThread?.(targetRootId, messageId);
+      if (!messageId || targetRootId) return;
       setTargetMessageId(messageId);
       setAnnouncement("Finding the selected message in conversation history.");
     };
     receiveTarget();
     window.addEventListener(MESSAGE_SEARCH_TARGET_EVENT, receiveTarget);
     return () => window.removeEventListener(MESSAGE_SEARCH_TARGET_EVENT, receiveTarget);
-  }, [conversationId, type]);
+  }, [conversationId, onOpenThread, type]);
 
   useEffect(() => {
     if (!targetMessageId || isLoading || isLoadingOlder) return;

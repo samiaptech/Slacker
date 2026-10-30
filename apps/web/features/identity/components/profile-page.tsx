@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { ArrowLeft, BadgeCheck, Copy, Mail, ShieldCheck, Users } from "lucide-react";
 import { Button, Input, Label } from "@workspace/ui";
 import { z } from "zod";
@@ -13,6 +12,7 @@ import { workspaceEmailVisibilitySchema, workspaceMembersSchema } from "../types
 import { createAuthenticationClient } from "./auth-client";
 import { ProfileDetailsCard } from "./profile-details-card";
 import { ProfileChannelNotifications } from "./profile-channel-notifications";
+import { ProfileImageControl } from "./profile-image-control";
 
 type ProfilePageProps = Readonly<{ apiBaseUrl: string }>;
 type StoredInviteLink = WorkspaceInviteLinkResponse;
@@ -248,11 +248,13 @@ export const ProfilePage = ({ apiBaseUrl }: ProfilePageProps): ReactElement => {
         <div aria-hidden="true" className="absolute -right-12 -top-24 -z-10 size-72 rounded-full border-[32px] border-white/[0.04]" />
         <div aria-hidden="true" className="absolute -bottom-28 right-24 -z-10 size-56 rounded-full bg-[#b8e3d1]/10 blur-2xl" />
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-          <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/20 bg-[#b8e3d1] text-3xl font-semibold text-[#173b3a] shadow-xl shadow-black/10">
-            {currentUser.image ? (
-              <Image alt="" className="size-full object-cover" height={96} src={currentUser.image} unoptimized width={96} />
-            ) : (currentUser.name || currentUser.email).slice(0, 1).toUpperCase()}
-          </div>
+          <ProfileImageControl
+            apiBaseUrl={apiBaseUrl}
+            email={currentUser.email}
+            image={currentUser.image}
+            name={currentUser.name}
+            onImageChange={(image) => setCurrentUserProfile({ image })}
+          />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b8e3d1]">Account profile</p>
             <h1 className="mt-2 truncate text-3xl font-semibold tracking-tight" id="profile-title">{currentUser.name}</h1>

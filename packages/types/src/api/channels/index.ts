@@ -14,5 +14,8 @@ export type {
   ChannelHistoryEntryResponse,
   ChannelMessageListResponse,
   ChannelMessageResponse,
+  ChannelThreadSummaryResponse,
+  ChannelThreadResponse,
+  ChannelThreadReplyResponse,
   ChannelSystemEventResponse
 } from "./channel-create-response.js";

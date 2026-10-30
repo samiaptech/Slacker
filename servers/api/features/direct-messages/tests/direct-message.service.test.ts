@@ -158,6 +158,28 @@ void test("opens one canonical DM for the same workspace member pair", async () 
   assert.equal(createDirectMessagePairKey("alice", "bob"), createDirectMessagePairKey("bob", "alice"));
 });
 
+void test("loads all direct-message list participant profiles in one batch", async () => {
+  const profileLookups: (readonly string[])[] = [];
+  const service = createService(
+    createMemoryStorage(),
+    () => Promise.resolve("member"),
+    undefined,
+    (userIds) => {
+      profileLookups.push(userIds);
+      return Promise.resolve(userIds.map((id) => ({ id, name: id, image: null })));
+    }
+  );
+  await service.open("workspace-1", "alice", "bob");
+  await service.open("workspace-1", "alice", "carol");
+  profileLookups.length = 0;
+
+  const result = await service.list("workspace-1", "alice");
+
+  assert.equal(result.kind, "listed");
+  assert.deepEqual(profileLookups, [["bob", "carol"]]);
+  assert.deepEqual(result.conversations.map(({ otherParticipant }) => otherParticipant.id), ["bob", "carol"]);
+});
+
 void test("reports unavailable workspace membership without creating a DM", async () => {
   const service = createService(createMemoryStorage(), () => Promise.resolve("unavailable"));
   assert.deepEqual(

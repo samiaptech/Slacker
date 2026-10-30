@@ -147,13 +147,14 @@ export const createMongoChannelMessageStorage = (
         const filter = query.before
           ? {
             channelId,
+            threadRootId: { $exists: false },
             hiddenForUserIds: { $nin: [userId] },
             $or: [
               { createdAt: { $lt: query.before.createdAt } },
               { createdAt: query.before.createdAt, _id: { $lt: query.before.id } }
             ]
           }
-          : { channelId, hiddenForUserIds: { $nin: [userId] } };
+          : { channelId, threadRootId: { $exists: false }, hiddenForUserIds: { $nin: [userId] } };
         const page = await messages.find(filter, { session })
           .sort({ createdAt: -1, _id: -1 })
           .limit(query.pageSize + 1)
@@ -188,6 +189,85 @@ export const createMongoChannelMessageStorage = (
         if (locked.matchedCount === 0) return "channel-unavailable";
         await messages.insertOne(message, { session });
         return "created";
+      });
+    },
+    findThreadForMember: async (workspaceId, channelId, userId, rootMessageId, query) => {
+      await ensureReady();
+      return runTransaction(async (session) => {
+        const channel = await channels.findOne({ _id: channelId, workspaceId }, { session });
+        const membership = await memberships.findOne({ channelId, userId }, { session });
+        if (!channel || !membership) return Object.freeze({ kind: "channel-unavailable" as const });
+        const root = await messages.findOne({
+          _id: rootMessageId,
+          channelId,
+          senderId: { $exists: true },
+          threadRootId: { $exists: false },
+          hiddenForUserIds: { $nin: [userId] }
+        }, { session });
+        if (!root) return Object.freeze({ kind: "channel-unavailable" as const });
+        const filter = query.before
+          ? {
+            channelId,
+            threadRootId: rootMessageId,
+            hiddenForUserIds: { $nin: [userId] },
+            $or: [
+              { createdAt: { $lt: query.before.createdAt } },
+              { createdAt: query.before.createdAt, _id: { $lt: query.before.id } }
+            ]
+          }
+          : { channelId, threadRootId: rootMessageId, hiddenForUserIds: { $nin: [userId] } };
+        const replies = await messages.find(filter, { session })
+          .sort({ createdAt: -1, _id: -1 })
+          .limit(query.pageSize + 1)
+          .toArray();
+        return Object.freeze({
+          kind: "listed" as const,
+          root,
+          replies: Object.freeze(replies)
+        });
+      });
+    },
+    createThreadReplyForMember: async (workspaceId, channelId, userId, rootMessageId, reply) => {
+      await ensureReady();
+      if (reply.threadRootId !== rootMessageId) return Object.freeze({ kind: "root-not-found" as const });
+      return runTransaction(async (session) => {
+        const membership = await memberships.findOne({ channelId, userId }, { session });
+        if (!membership) return Object.freeze({ kind: "channel-unavailable" as const });
+        const locked = await channels.updateOne(
+          { _id: channelId, workspaceId, lifecycleState: "active" },
+          { $inc: { membershipRevision: 1 } },
+          { session }
+        );
+        if (locked.matchedCount === 0) return Object.freeze({ kind: "channel-unavailable" as const });
+        const root = await messages.findOne({
+          _id: rootMessageId,
+          channelId,
+          senderId: { $exists: true },
+          threadRootId: { $exists: false },
+          hiddenForUserIds: { $nin: [userId] }
+        }, { session });
+        if (!root) return Object.freeze({ kind: "root-not-found" as const });
+        await messages.insertOne(reply, { session });
+        await messages.updateOne(
+          { _id: rootMessageId, channelId, threadRootId: { $exists: false } },
+          {
+            $inc: { threadReplyCount: 1 },
+            $max: { threadLastReplyAt: reply.createdAt }
+          },
+          { session }
+        );
+        const updatedRoot = await messages.findOne({ _id: rootMessageId, channelId }, { session });
+        if (!updatedRoot || !updatedRoot.threadReplyCount || !updatedRoot.threadLastReplyAt) {
+          throw new Error("A channel thread root was not updated after reply creation.");
+        }
+        return Object.freeze({
+          kind: "created" as const,
+          reply,
+          thread: Object.freeze({
+            replyCount: updatedRoot.threadReplyCount,
+            lastReplyAt: updatedRoot.threadLastReplyAt
+          })
+        });
       });
     },
     editForMember: async (workspaceId, channelId, userId, messageId, text, expectedEditedAt, editedAt) => {
@@ -264,15 +344,50 @@ export const createMongoChannelMessageStorage = (
         }
         const deleted = await messages.deleteOne({ _id: messageId, channelId }, { session });
         if (deleted.deletedCount === 0) return Object.freeze({ kind: "not-found" as const });
+        const replyDocuments = message.threadRootId
+          ? []
+          : message.threadReplyCount
+            ? await messages.find({
+              channelId,
+              threadRootId: messageId
+            }, { session }).toArray()
+            : [];
+        const deletedMessageIds = [messageId, ...replyDocuments.map(({ _id }) => _id)];
+        if (replyDocuments.length > 0) {
+          await messages.deleteMany({
+            channelId,
+            threadRootId: messageId
+          }, { session });
+        }
         await reactions.deleteMany({
           workspaceId,
           scope: "channel",
           parentId: channelId,
-          messageId
+          messageId: { $in: deletedMessageIds }
         }, { session });
+        if (message.threadRootId) {
+          const remaining = await messages.find({
+            channelId,
+            threadRootId: message.threadRootId
+          }, { session }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray();
+          const latestReply = remaining[0];
+          await messages.updateOne(
+            { _id: message.threadRootId, channelId, threadRootId: { $exists: false } },
+            {
+              $inc: { threadReplyCount: -1 },
+              ...(latestReply
+                ? { $set: { threadLastReplyAt: latestReply.createdAt } }
+                : { $unset: { threadLastReplyAt: "" } })
+            },
+            { session }
+          );
+        }
         return Object.freeze({
           kind: "deleted" as const,
-          attachments: Object.freeze([...(message.attachments ?? [])])
+          attachments: Object.freeze([
+            ...(message.attachments ?? []),
+            ...replyDocuments.flatMap(({ attachments }) => attachments ?? [])
+          ])
         });
       });
     },

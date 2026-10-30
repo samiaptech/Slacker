@@ -116,7 +116,8 @@ export const useNotifications = (
     const onNotification = (payload: Parameters<RealtimeServerEvents["notification:new"]>[0]): void => {
       const parsed = notificationEventSchema.safeParse(payload);
       if (!parsed.success) return;
-      const { notification } = parsed.data;
+      const { recipientId, ...notification } = parsed.data.notification;
+      if (!recipientId) return;
       notificationRevisionRef.current += 1;
       setNotifications((current) => {
         if (current.some((item) => item.id === notification.id)) return current;

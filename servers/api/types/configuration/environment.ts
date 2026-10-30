@@ -17,4 +17,7 @@ export type ValidatedApiEnvironment = Readonly<{
   CLOUDINARY_CLOUD_NAME?: string | undefined;
   CLOUDINARY_API_KEY?: string | undefined;
   CLOUDINARY_API_SECRET?: string | undefined;
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string | undefined;
+  OTEL_EXPORTER_OTLP_HEADERS?: string | undefined;
+  OTEL_SERVICE_NAME?: string | undefined;
 }>;

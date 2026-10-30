@@ -1,8 +1,11 @@
 export { createCloudinaryIntegration } from "./cloudinary.integration.js";
 export type {
+  CloudinaryIntegration,
   ChatAttachmentIntegration,
   ChatAttachmentUpload,
-  CloudinaryConfiguration
+  CloudinaryConfiguration,
+  ProfileImageAsset,
+  ProfileImageStorage
 } from "./cloudinary.integration.js";
 export {
   CHAT_ATTACHMENT_MAX_BYTES,

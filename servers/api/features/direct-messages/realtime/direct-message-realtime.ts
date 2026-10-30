@@ -7,7 +7,11 @@ import type {
   RealtimeServerEvents
 } from "@workspace/types";
 import type { Socket } from "socket.io";
-import type { AuthenticatedSocketData, SocketIoApi } from "../../../integrations/socket-io/index.js";
+import type {
+  AuthenticatedSocketData,
+  SocketIoApi,
+  SocketIoTelemetry
+} from "../../../integrations/socket-io/index.js";
 import type { DirectMessageService } from "../services/index.js";
 
 type DirectMessageSocket = Socket<
@@ -33,6 +37,7 @@ type DirectMessageRealtimeDependencies = Readonly<{
   socketIo: SocketIoApi;
   service: Pick<DirectMessageService, "get">;
   logger: Logger;
+  telemetry?: Pick<SocketIoTelemetry, "recordEventFailure">;
 }>;
 
 const conversationIdSchema = z.string().trim().min(1).max(128);
@@ -49,8 +54,10 @@ const reportFailure = (
   socket: DirectMessageSocket,
   logger: Logger,
   event: string,
-  error: unknown
+  error: unknown,
+  telemetry?: Pick<SocketIoTelemetry, "recordEventFailure">
 ): void => {
+  telemetry?.recordEventFailure(event);
   logger.error("Realtime direct-message operation failed.", {
     event,
     error: error instanceof Error ? error.message : "Unknown realtime error."
@@ -64,7 +71,8 @@ const reportFailure = (
 export const createDirectMessageRealtime = ({
   socketIo,
   service,
-  logger
+  logger,
+  telemetry
 }: DirectMessageRealtimeDependencies): DirectMessageRealtimePublisher => {
   const { io } = socketIo;
   const lastTypingEventAt = new WeakMap<DirectMessageSocket, number>();
@@ -95,7 +103,7 @@ export const createDirectMessageRealtime = ({
         await socket.join(directMessageRoom(workspaceId, parsedId.data));
         socket.emit("direct-message:ready", { conversationId: parsedId.data });
       })().catch((error: unknown) => {
-        reportFailure(socket, logger, "direct-message:subscribe", error);
+        reportFailure(socket, logger, "direct-message:subscribe", error, telemetry);
       });
     });
 
@@ -146,7 +154,7 @@ export const createDirectMessageRealtime = ({
           active: parsed.data.active
         });
       })().catch((error: unknown) => {
-        reportFailure(socket, logger, "direct-message:typing", error);
+        reportFailure(socket, logger, "direct-message:typing", error, telemetry);
       });
     });
   });

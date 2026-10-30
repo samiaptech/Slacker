@@ -3,6 +3,7 @@ export const NOTIFICATIONS_COLLECTION = "user_notifications";
 export type NotificationType =
   | "channel_message"
   | "direct_message"
+  | "channel_thread_reply"
   | "mention"
   | "channel_member_joined"
   | "channel_member_left"
@@ -23,6 +24,7 @@ export type NotificationRecord = Readonly<{
   actor: Readonly<{ id: string; name: string }>;
   createdAt: Date;
   readAt: Date | null;
+  threadRootId?: string;
 }>;
 
 export type NotificationDocument = Omit<NotificationRecord, "id" | "resource" | "actor"> & Readonly<{
@@ -48,12 +50,13 @@ export const NOTIFICATIONS_COLLECTION_VALIDATOR = Object.freeze({
       workspaceId: Object.freeze({ bsonType: "string", minLength: 1 }),
       type: Object.freeze({
         enum: [
-          "channel_message", "direct_message", "mention",
+          "channel_message", "channel_thread_reply", "direct_message", "mention",
           "channel_member_joined", "channel_member_left", "channel_updated"
         ]
       }),
       resourceType: Object.freeze({ enum: ["channel", "direct_message"] }),
       resourceId: Object.freeze({ bsonType: "string", minLength: 1 }),
+      threadRootId: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
       actorId: Object.freeze({ bsonType: "string", minLength: 1 }),
       actorName: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
       createdAt: Object.freeze({ bsonType: "date" }),

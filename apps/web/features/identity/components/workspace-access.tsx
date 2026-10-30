@@ -14,6 +14,7 @@ import type {
   WorkspaceMutationResponse
 } from "@workspace/types";
 import { application } from "@/constants/application";
+import { fetchSharedGet } from "@/app/fetch-shared-get";
 import { WorkspaceContextProvider } from "@/features/workspace-foundation/public";
 import { createAuthenticationClient } from "./auth-client";
 import { workspaceAccessSchema } from "../types";
@@ -97,13 +98,13 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     const loadWorkspaces = async (): Promise<void> => {
       try {
         const storedWorkspaceId = window.localStorage.getItem("nutshyll.activeWorkspaceId");
-        const workspaceRequest = fetch(new URL("/workspaces", apiBaseUrl), {
+        const workspaceRequest = fetchSharedGet(new URL("/workspaces", apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           signal: controller.signal
         });
         const storedAccessRequest = storedWorkspaceId
-          ? fetch(new URL("/workspace", apiBaseUrl), {
+          ? fetchSharedGet(new URL("/workspace", apiBaseUrl), {
             credentials: "include",
             cache: "no-store",
             headers: { "X-Workspace-Id": storedWorkspaceId },
@@ -136,7 +137,7 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
         if (!selected) throw new Error("No workspace is available.");
         const accessResponse = selected.id === storedWorkspaceId && storedAccessResponse
           ? storedAccessResponse
-          : await fetch(new URL("/workspace", apiBaseUrl), {
+          : await fetchSharedGet(new URL("/workspace", apiBaseUrl), {
             credentials: "include",
             cache: "no-store",
             headers: { "X-Workspace-Id": selected.id },
@@ -222,7 +223,11 @@ export const WorkspaceAccess = ({ apiBaseUrl, children, fullWidth = false }: Wor
     router.replace("/");
   };
 
-  const setCurrentUserProfile = (profile: Readonly<{ name: string; title: string | null }>): void => {
+  const setCurrentUserProfile = (profile: Readonly<{
+    name?: string;
+    title?: string | null;
+    image?: string | null;
+  }>): void => {
     setAccess((current) => current ? { ...current, user: { ...current.user, ...profile } } : current);
   };
 

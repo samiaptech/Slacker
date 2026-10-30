@@ -67,6 +67,33 @@ const withParticipant = async (
   });
 };
 
+const withParticipants = async (
+  conversations: readonly DirectConversation[],
+  userId: string,
+  findUsersByIds: DirectMessageServiceDependencies["findUsersByIds"]
+): Promise<readonly DirectConversationWithParticipant[]> => {
+  const participantIds = conversations.map((conversation) => {
+    const otherParticipantId = conversation.participantIds.find((id) => id !== userId);
+    if (!otherParticipantId) throw new Error("Direct conversation has no other participant.");
+    return otherParticipantId;
+  });
+  const profiles = await findUsersByIds([...new Set(participantIds)]);
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  return Object.freeze(conversations.map((conversation, index) => {
+    const id = participantIds[index];
+    if (!id) throw new Error("Direct conversation participant lookup failed.");
+    const profile = profilesById.get(id);
+    return Object.freeze({
+      ...conversation,
+      otherParticipant: Object.freeze({
+        id,
+        name: profile?.name || "Former member",
+        image: profile?.image ?? null
+      })
+    });
+  }));
+};
+
 export const createDirectMessageService = ({
   repository,
   attachmentStorage,
@@ -194,8 +221,7 @@ export const createDirectMessageService = ({
   list: async (workspaceId: string, userId: string) => {
     try {
       const conversations = await repository.listForMember(workspaceId, userId);
-      const listed = await Promise.all(conversations.map((conversation) =>
-        withParticipant(conversation, userId, findUsersByIds)));
+      const listed = await withParticipants(conversations, userId, findUsersByIds);
       return Object.freeze({ kind: "listed" as const, conversations: Object.freeze(listed) });
     } catch (error: unknown) {
       if (isStorageUnavailable(error)) return Object.freeze({ kind: "unavailable" as const });

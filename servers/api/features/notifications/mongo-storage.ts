@@ -26,6 +26,10 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
     userId: string;
     notificationPreference?: ChannelNotificationPreference;
   }>>("channel_memberships");
+  const channelMessages = database.collection<Readonly<{
+    _id: string;
+    senderId?: string;
+  }>>("channel_messages");
   const conversations = database.collection<{
     _id: string;
     workspaceId: string;
@@ -83,7 +87,8 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
         actorId: event.actor.id,
         actorName: event.actor.name,
         createdAt: event.createdAt,
-        readAt: null
+        readAt: null,
+        ...(event.threadRootId ? { threadRootId: event.threadRootId } : {})
       });
       try {
         const result = await notifications.updateOne(
@@ -134,6 +139,31 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
         return createForRecipients(event, recipients, mentionedUserIds);
       });
     },
+    createForChannelThreadReply: async (event, rootMessageId, mentionedUserIds) => {
+      return run(async () => {
+        const [channelMembers, threadMessages] = await Promise.all([
+          memberships.find({ channelId: event.resource.id }).toArray(),
+          channelMessages.find({
+            channelId: event.resource.id,
+            $or: [{ _id: rootMessageId }, { threadRootId: rootMessageId }]
+          }, { projection: { _id: 0, senderId: 1 } }).toArray()
+        ]);
+        const participants = new Set(threadMessages.flatMap(({ senderId }) =>
+          senderId ? [senderId] : []));
+        const mentioned = new Set(mentionedUserIds);
+        const recipients = channelMembers.flatMap(({ userId, notificationPreference }) => {
+          const preference: unknown = notificationPreference ?? "all";
+          if (!isChannelNotificationPreference(preference) || preference === "muted") return [];
+          const isMentioned = mentioned.has(userId);
+          const isParticipant = participants.has(userId);
+          return preference === "all" && (isParticipant || isMentioned)
+            || preference === "mentions_only" && isMentioned
+            ? [userId]
+            : [];
+        });
+        return createForRecipients(event, recipients, mentionedUserIds);
+      });
+    },
     createForDirectMessage: async (event) => {
       return run(async () => {
         const conversation = await conversations.findOne({
@@ -175,6 +205,19 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
           recipientId: userId,
           resourceType: resource.type,
           resourceId: resource.id,
+          ...(resource.type === "channel" ? { threadRootId: { $exists: false } } : {}),
+          readAt: null
+        }, { $set: { readAt } });
+        return result.modifiedCount;
+      });
+    },
+    markThreadRead: async (userId, channelId, rootMessageId, readAt) => {
+      return run(async () => {
+        const result = await notifications.updateMany({
+          recipientId: userId,
+          resourceType: "channel",
+          resourceId: channelId,
+          threadRootId: rootMessageId,
           readAt: null
         }, { $set: { readAt } });
         return result.modifiedCount;

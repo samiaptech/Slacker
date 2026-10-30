@@ -101,6 +101,7 @@ void test("uses authenticated workspace role for DM global deletion while requir
         ? identities.get(headers["x-test-identity"]) ?? null
         : null
     ),
+    updateUserImage: () => Promise.resolve(),
     findUserByEmail: () => Promise.resolve(null),
     findUsersByIds: () => Promise.resolve([])
   };

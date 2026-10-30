@@ -6,6 +6,7 @@ import type { ChannelNotificationPreference, ChannelNotificationPreferenceRespon
 import { z } from "zod";
 import { Button, Label } from "@workspace/ui";
 import { RadioGroup, RadioGroupItem } from "@workspace/ui/primitives";
+import { fetchSharedGet } from "@/app/fetch-shared-get";
 
 const preferenceSchema = z.object({
   preference: z.enum(["all", "mentions_only", "muted"])
@@ -59,7 +60,7 @@ export const ChannelNotificationPreferences = ({
   useEffect(() => {
     if (!enabled || result?.key === requestKey) return;
     const controller = new AbortController();
-    void fetch(new URL(`/channels/${encodeURIComponent(channelId)}/notification-preference`, apiBaseUrl), {
+    void fetchSharedGet(new URL(`/channels/${encodeURIComponent(channelId)}/notification-preference`, apiBaseUrl), {
       credentials: "include",
       cache: "no-store",
       headers: { "X-Workspace-Id": workspaceId },

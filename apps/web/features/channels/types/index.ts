@@ -19,6 +19,9 @@ export { submitChannelCreation } from "./submit-channel-creation";
 export type { SubmitChannelCreationResult } from "./submit-channel-creation";
 export {
   channelMessageListResponseSchema,
-  channelMessageResponseSchema
+  channelMessageResponseSchema,
+  channelThreadResponseSchema,
+  channelThreadReplyResponseSchema,
+  channelThreadSummarySchema
 } from "./channel-message-response";
 export type { ChannelHistoryEntryView, ChannelMessageListView, ChannelMessageView } from "./channel-message-response";

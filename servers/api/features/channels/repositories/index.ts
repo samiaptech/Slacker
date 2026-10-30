@@ -22,5 +22,8 @@ export type {
   ChannelMessageEditResult,
   ChannelMessageEditStorageResult,
   ChannelMessageStorage,
-  ChannelMessageStorageResult
+  ChannelMessageStorageResult,
+  ChannelThreadStorageResult,
+  ChannelThreadReplyStorageResult,
+  ChannelThreadReplyResult
 } from "./channel-message.repository.js";

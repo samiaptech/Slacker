@@ -12,6 +12,7 @@ overrides:
 
 allowBuilds:
   esbuild: true
+  protobufjs: false
   unrs-resolver: true
 
 audit:

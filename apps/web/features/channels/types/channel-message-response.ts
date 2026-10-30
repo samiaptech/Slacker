@@ -4,6 +4,9 @@ import type {
   ChannelMessageListResponse,
   ChannelMessageResponse,
   ChannelSystemEventResponse,
+  ChannelThreadResponse,
+  ChannelThreadReplyResponse,
+  ChannelThreadSummaryResponse,
   ChatAttachmentResponse
 } from "@workspace/types";
 import { messageReactionSchema } from "@/features/conversation-history/public";
@@ -26,6 +29,11 @@ const channelMessageBaseSchema = z.object({
   editedAt: z.string().datetime().nullable().optional(),
   attachments: z.array(attachmentSchema).max(5).readonly().optional(),
   reactions: z.array(messageReactionSchema).readonly().optional(),
+  threadRootId: z.string().min(1).nullable().optional(),
+  thread: z.object({
+    replyCount: z.number().int().positive(),
+    lastReplyAt: z.iso.datetime()
+  }).strict().nullable().optional(),
   sender: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -34,7 +42,16 @@ const channelMessageBaseSchema = z.object({
 }).strict();
 
 const channelMessageSchema = channelMessageBaseSchema.transform((message): ChannelMessageResponse => {
-  return { ...message, type: "message", attachments: message.attachments ?? [], reactions: message.reactions ?? [], editedAt: message.editedAt ?? null };
+  const { threadRootId, thread, ...rest } = message;
+  return {
+    ...rest,
+    type: "message",
+    attachments: message.attachments ?? [],
+    reactions: message.reactions ?? [],
+    editedAt: message.editedAt ?? null,
+    ...(threadRootId === undefined ? {} : { threadRootId }),
+    ...(thread === undefined ? {} : { thread })
+  };
 }) satisfies z.ZodType<ChannelMessageResponse>;
 
 const channelSystemEventSchema = z.object({
@@ -58,6 +75,25 @@ export const channelMessageListResponseSchema = z.object({
 }).strict() satisfies z.ZodType<ChannelMessageListResponse>;
 
 export const channelMessageResponseSchema = channelMessageSchema;
+
+export const channelThreadResponseSchema = z.object({
+  root: channelMessageSchema,
+  replies: z.array(channelMessageSchema),
+  nextCursor: z.string().min(1).max(256).nullable()
+}).strict() satisfies z.ZodType<ChannelThreadResponse>;
+
+export const channelThreadReplyResponseSchema = z.object({
+  reply: channelMessageSchema,
+  thread: z.object({
+    replyCount: z.number().int().positive(),
+    lastReplyAt: z.iso.datetime()
+  }).strict()
+}).strict() satisfies z.ZodType<ChannelThreadReplyResponse>;
+
+export const channelThreadSummarySchema = z.object({
+  replyCount: z.number().int().positive(),
+  lastReplyAt: z.iso.datetime()
+}).strict() satisfies z.ZodType<ChannelThreadSummaryResponse>;
 
 export type ChannelMessageView = z.infer<typeof channelMessageSchema>;
 export type ChannelHistoryEntryView = z.infer<typeof channelHistoryEntrySchema>;

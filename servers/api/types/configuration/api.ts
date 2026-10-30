@@ -13,4 +13,9 @@ export type ApiConfig = Readonly<{
   googleClientSecret: string;
   logLevel: LogLevel;
   cloudinary?: Readonly<{ cloudName: string; apiKey: string; apiSecret: string }>;
+  telemetry?: Readonly<{
+    endpoint: string;
+    headers: string;
+    serviceName: string;
+  }>;
 }>;

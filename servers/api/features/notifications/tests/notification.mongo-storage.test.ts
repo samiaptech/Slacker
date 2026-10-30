@@ -110,3 +110,71 @@ void test("initializes durable notification storage and deduplicates per recipie
     ["dm-recipient", "direct_message"]
   ]);
 });
+
+void test("notifies only thread participants and mentioned current members with their root ID", async () => {
+  const documents: Record<string, unknown>[] = [];
+  const members = [
+    { userId: "actor" },
+    { userId: "root-author" },
+    { userId: "participant" },
+    { userId: "unrelated" },
+    { userId: "all-mentioned" },
+    { userId: "mentions-only-mentioned", notificationPreference: "mentions_only" as const },
+    { userId: "mentions-only-other", notificationPreference: "mentions_only" as const },
+    { userId: "muted-participant", notificationPreference: "muted" as const }
+  ];
+  const channelMessages = [
+    { _id: "root-1", senderId: "root-author" },
+    { _id: "reply-1", senderId: "participant", threadRootId: "root-1" },
+    { _id: "reply-2", senderId: "muted-participant", threadRootId: "root-1" }
+  ];
+  const notificationCollection = {
+    indexes: () => Promise.resolve(NOTIFICATIONS_INDEXES.map((index) => ({
+      name: index.options.name,
+      key: index.keys,
+      unique: index.options.unique
+    }))),
+    updateOne: (_filter: unknown, update: { $setOnInsert: Record<string, unknown> }) => {
+      documents.push(update.$setOnInsert);
+      return Promise.resolve({ upsertedCount: 1 });
+    }
+  };
+  const database = {
+    listCollections: () => ({
+      next: () => Promise.resolve({
+        name: NOTIFICATIONS_COLLECTION,
+        options: { validator: NOTIFICATIONS_COLLECTION_VALIDATOR }
+      })
+    }),
+    collection: (name: string) => name === NOTIFICATIONS_COLLECTION
+      ? notificationCollection
+      : name === "channel_memberships"
+        ? { find: () => ({ toArray: () => Promise.resolve(members) }) }
+        : { find: () => ({ toArray: () => Promise.resolve(channelMessages) }) }
+  } as unknown as MongoDatabase;
+  const storage = createMongoNotificationStorage(database);
+  const event = {
+    eventId: "reply-3",
+    workspaceId: "workspace-1",
+    resource: { type: "channel" as const, id: "channel-1" },
+    type: "channel_thread_reply" as const,
+    actor: { id: "actor", name: "Actor" },
+    createdAt: new Date("2026-10-26T09:00:00.000Z"),
+    threadRootId: "root-1"
+  };
+
+  const created = await storage.createForChannelThreadReply(
+    event,
+    "root-1",
+    ["all-mentioned", "mentions-only-mentioned", "unknown"]
+  );
+  assert.deepEqual(created.map(({ recipientId, type, threadRootId }) =>
+    [recipientId, type, threadRootId]), [
+    ["root-author", "channel_thread_reply", "root-1"],
+    ["participant", "channel_thread_reply", "root-1"],
+    ["all-mentioned", "mention", "root-1"],
+    ["mentions-only-mentioned", "mention", "root-1"]
+  ]);
+  assert.equal(documents.some(({ recipientId }) => recipientId === "unrelated"), false);
+  assert.equal(documents.some(({ recipientId }) => recipientId === "muted-participant"), false);
+});

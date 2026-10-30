@@ -33,7 +33,8 @@ const toRecord = (document: NotificationDocument): NotificationRecord => Object.
   resource: Object.freeze({ type: document.resourceType, id: document.resourceId }),
   actor: Object.freeze({ id: document.actorId, name: document.actorName }),
   createdAt: document.createdAt,
-  readAt: document.readAt
+  readAt: document.readAt,
+  ...(document.threadRootId ? { threadRootId: document.threadRootId } : {})
 });
 
 export const encodeNotificationCursor = (notification: NotificationRecord): string =>
@@ -81,7 +82,8 @@ export const createNotificationService = ({
     type: NotificationType,
     actor: Readonly<{ id: string; name: string }>,
     eventId?: string,
-    createdAt?: Date
+    createdAt?: Date,
+    threadRootId?: string
   ): NotificationEvent => Object.freeze({
     eventId: eventId ?? createId(),
     workspaceId,
@@ -91,7 +93,8 @@ export const createNotificationService = ({
       id: actor.id,
       name: actor.name.trim().slice(0, 128) || "Former member"
     }),
-    createdAt: createdAt ?? now()
+    createdAt: createdAt ?? now(),
+    ...(threadRootId ? { threadRootId } : {})
   });
 
   return Object.freeze({
@@ -113,6 +116,30 @@ export const createNotificationService = ({
         input.createdAt
       );
       await publish(await storage.createForChannel(event, mentionedUserIds(input.text)));
+    },
+    notifyChannelThreadReply: async (input: Readonly<{
+      workspaceId: string;
+      channelId: string;
+      rootMessageId: string;
+      messageId: string;
+      actor: Readonly<{ id: string; name: string }>;
+      text: string;
+      createdAt: Date;
+    }>): Promise<void> => {
+      const event = createEvent(
+        input.workspaceId,
+        { type: "channel", id: input.channelId },
+        "channel_thread_reply",
+        input.actor,
+        input.messageId,
+        input.createdAt,
+        input.rootMessageId
+      );
+      await publish(await storage.createForChannelThreadReply(
+        event,
+        input.rootMessageId,
+        mentionedUserIds(input.text)
+      ));
     },
     notifyChannelActivity: async (input: Readonly<{
       workspaceId: string;
@@ -175,6 +202,10 @@ export const createNotificationService = ({
     },
     markResourceRead: async (userId: string, resource: NotificationResource): Promise<void> => {
       await storage.markResourceRead(userId, resource, now());
+      realtime?.publishUnreadCount(userId, await storage.unreadCount(userId));
+    },
+    markThreadRead: async (userId: string, channelId: string, rootMessageId: string): Promise<void> => {
+      await storage.markThreadRead(userId, channelId, rootMessageId, now());
       realtime?.publishUnreadCount(userId, await storage.unreadCount(userId));
     }
   });

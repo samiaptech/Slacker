@@ -2,7 +2,8 @@ import {
   CHANNEL_MESSAGE_MAX_LENGTH,
   type ChannelMessage,
   type ChannelMessageDeleteScope,
-  type ChannelMessagePageQuery
+  type ChannelMessagePageQuery,
+  type ChannelThreadSummary
 } from "../domain/index.js";
 import type { MessageReactionEmoji, MessageReactionResponse } from "@workspace/types";
 import type { StoredMessageReaction } from "../../message-reactions/public/index.js";
@@ -31,6 +32,14 @@ export type ChannelMessagePageResult =
   | Readonly<{ kind: "listed"; messages: readonly ChannelMessageWithSender[]; nextCursor: string | null }>
   | Readonly<{ kind: "channel-unavailable" }>
   | Readonly<{ kind: "unavailable" }>;
+export type ChannelThreadPageResult =
+  | Readonly<{
+    kind: "listed";
+    root: ChannelMessageWithSender;
+    replies: readonly ChannelMessageWithSender[];
+    nextCursor: string | null;
+  }>
+  | Readonly<{ kind: "channel-unavailable" | "unavailable" }>;
 
 export type DeleteChannelMessageResult =
   | Readonly<{ kind: "deleted" }>
@@ -38,13 +47,14 @@ export type DeleteChannelMessageResult =
   | Readonly<{ kind: "not-found" | "forbidden" | "unavailable" }>;
 
 export type SendChannelMessageResult =
-  | Readonly<{ kind: "sent"; message: ChannelMessageWithSender }>
+  | Readonly<{ kind: "sent"; message: ChannelMessageWithSender; thread?: ChannelThreadSummary }>
   | Readonly<{
     kind: "invalid";
     error: "message_required" | "message_too_long" | "attachment_limit_exceeded"
       | "unsupported_file_type" | "invalid_file_content" | "file_too_large";
   }>
   | Readonly<{ kind: "channel-unavailable" }>
+  | Readonly<{ kind: "root-not-found" }>
   | Readonly<{ kind: "attachment-unavailable" }>
   | Readonly<{ kind: "unavailable" }>;
 export type EditChannelMessageResult =
@@ -53,7 +63,8 @@ export type EditChannelMessageResult =
   | Exclude<ChannelMessageEditResult, { kind: "updated" }>
   | Readonly<{ kind: "unavailable" }>;
 
-export type ChannelMessageService = ReturnType<typeof createChannelMessageService>;
+export type ChannelMessageService = Omit<ReturnType<typeof createChannelMessageService>, "listThread"> &
+  Readonly<{ listThread?: ReturnType<typeof createChannelMessageService>["listThread"] }>;
 
 type ChannelMessageServiceDependencies = Readonly<{
   repository: ChannelMessageRepository;
@@ -83,18 +94,20 @@ export const createChannelMessageService = ({
     try {
       const result = await repository.findForMember(workspaceId, channelId, userId, query);
       if (result.kind !== "listed") return result;
-      const profiles = await findUsersByIds([...new Set(result.messages.flatMap((message) =>
-        "senderId" in message ? [message.senderId] : []
-      ))]);
+      const [profiles, reactionGroups] = await Promise.all([
+        findUsersByIds([...new Set(result.messages.flatMap((message) =>
+          "senderId" in message ? [message.senderId] : []
+        ))]),
+        repository.listReactionsForMember
+          ? repository.listReactionsForMember(
+            workspaceId,
+            channelId,
+            userId,
+            result.messages.map(({ id }) => id)
+          )
+          : Promise.resolve(Object.freeze([]))
+      ]);
       const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
-      const reactionGroups = repository.listReactionsForMember
-        ? await repository.listReactionsForMember(
-          workspaceId,
-          channelId,
-          userId,
-          result.messages.map(({ id }) => id)
-        )
-        : Object.freeze([]);
       const reactionsByMessage = await resolveReactions(reactionGroups, findUsersByIds);
       return Object.freeze({
         kind: "listed",
@@ -112,6 +125,52 @@ export const createChannelMessageService = ({
             reactions: reactionsByMessage.get(message.id) ?? Object.freeze([])
           });
         }))
+      });
+    } catch (error: unknown) {
+      if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
+      throw error;
+    }
+  },
+  listThread: async (
+    workspaceId: string,
+    channelId: string,
+    userId: string,
+    rootMessageId: string,
+    query: ChannelMessagePageQuery
+  ): Promise<ChannelThreadPageResult> => {
+    try {
+      if (!repository.findThreadForMember) return Object.freeze({ kind: "unavailable" });
+      const result = await repository.findThreadForMember(workspaceId, channelId, userId, rootMessageId, query);
+      if (result.kind !== "listed") return result;
+      const messages = [result.root, ...result.replies];
+      const profiles = await findUsersByIds([...new Set(messages.map(({ senderId }) => senderId))]);
+      const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const reactionGroups = repository.listReactionsForMember
+        ? await repository.listReactionsForMember(
+          workspaceId,
+          channelId,
+          userId,
+          messages.map(({ id }) => id)
+        )
+        : Object.freeze([]);
+      const reactionsByMessage = await resolveReactions(reactionGroups, findUsersByIds);
+      const withSender = (message: ChannelMessage): ChannelMessageWithSender => {
+        const profile = profilesById.get(message.senderId);
+        return Object.freeze({
+          ...message,
+          sender: Object.freeze({
+            id: message.senderId,
+            name: profile?.name || "Former member",
+            image: profile?.image ?? null
+          }),
+          reactions: reactionsByMessage.get(message.id) ?? Object.freeze([])
+        });
+      };
+      return Object.freeze({
+        kind: "listed",
+        root: withSender(result.root),
+        replies: Object.freeze(result.replies.map(withSender)),
+        nextCursor: result.nextCursor
       });
     } catch (error: unknown) {
       if (isChannelStorageUnavailableError(error)) return Object.freeze({ kind: "unavailable" });
@@ -170,7 +229,8 @@ export const createChannelMessageService = ({
     userId: string,
     text: string,
     files: readonly ChatAttachmentUpload[] = [],
-    senderProfile?: Omit<ChannelMessageSender, "id">
+    senderProfile?: Omit<ChannelMessageSender, "id">,
+    threadRootId?: string
   ): Promise<SendChannelMessageResult> => {
     if (files.length > CHAT_ATTACHMENT_MAX_FILES) {
       return Object.freeze({ kind: "invalid", error: "attachment_limit_exceeded" });
@@ -215,12 +275,27 @@ export const createChannelMessageService = ({
         senderId: userId,
         text: files.length > 0 && validated.text.trim().length === 0 ? "" : validated.text,
         createdAt: now(),
+        ...(threadRootId ? { threadRootId, thread: null } : {}),
         ...(uploaded.length > 0 ? { attachments: Object.freeze([...uploaded]) } : {})
       });
-      const result = await repository.createForMember(workspaceId, channelId, userId, message);
-      if (result !== "created") {
-        await removeUploaded();
-        return Object.freeze({ kind: "channel-unavailable" });
+      let thread: ChannelThreadSummary | undefined;
+      if (threadRootId) {
+        if (!repository.createThreadReplyForMember) {
+          await removeUploaded();
+          return Object.freeze({ kind: "unavailable" });
+        }
+        const result = await repository.createThreadReplyForMember(workspaceId, channelId, userId, threadRootId, message);
+        if (result.kind !== "created") {
+          await removeUploaded();
+          return Object.freeze({ kind: result.kind });
+        }
+        thread = result.thread;
+      } else {
+        const result = await repository.createForMember(workspaceId, channelId, userId, message);
+        if (result !== "created") {
+          await removeUploaded();
+          return Object.freeze({ kind: "channel-unavailable" });
+        }
       }
       persisted = true;
       const profile = senderProfile ?? (await findUsersByIds([userId]))
@@ -235,7 +310,8 @@ export const createChannelMessageService = ({
             image: profile?.image ?? null
           }),
           reactions: Object.freeze([])
-        })
+        }),
+        ...(thread ? { thread } : {})
       });
     } catch (error: unknown) {
       if (!persisted) await removeUploaded();

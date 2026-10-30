@@ -19,6 +19,14 @@ export type SocketIoApi = Readonly<{
   close: () => Promise<void>;
 }>;
 
+export type SocketIoTelemetry = Readonly<{
+  recordConnectionAttempt: (outcome: "success" | "failure") => void;
+  recordConnectionOpened: () => void;
+  recordConnectionClosed: (durationSeconds: number) => void;
+  recordEvent: (direction: "received" | "emitted", eventName: string) => void;
+  recordEventFailure: (eventName: string) => void;
+}>;
+
 export const SOCKET_SESSION_REVALIDATION_INTERVAL_MS = 30_000;
 export const SOCKET_CONNECTIONS_PER_USER_LIMIT = 5;
 export const SOCKET_CONNECTIONS_PER_IP_LIMIT = 20;
@@ -37,6 +45,7 @@ type SocketIoDependencies = Readonly<{
   webOrigin: string;
   getIdentity: (headers: IncomingHttpHeaders) => Promise<AuthenticationIdentity | null>;
   logger: Logger;
+  telemetry?: SocketIoTelemetry;
   adapterCollection?: Collection;
   sessionRevalidationIntervalMs?: number;
   limits?: Partial<SocketIoLimits>;
@@ -68,6 +77,7 @@ export const createSocketIoIntegration = ({
   webOrigin,
   getIdentity,
   logger,
+  telemetry,
   adapterCollection,
   sessionRevalidationIntervalMs = SOCKET_SESSION_REVALIDATION_INTERVAL_MS,
   limits,
@@ -113,6 +123,7 @@ export const createSocketIoIntegration = ({
   io.use((socket, next) => {
     const origin = socket.handshake.headers.origin;
     if (origin !== webOrigin) {
+      telemetry?.recordConnectionAttempt("failure");
       logger.warn("Realtime connection rejected.", {
         reason: origin ? "origin_not_allowed" : "origin_missing"
       });
@@ -125,6 +136,7 @@ export const createSocketIoIntegration = ({
       trustVercelForwardedFor
     );
     if ((connectionsByIp.get(clientIp) ?? 0) >= configuredLimits.connectionsPerIp) {
+      telemetry?.recordConnectionAttempt("failure");
       logger.warn("Realtime connection rejected.", { reason: "ip_connection_limit" });
       next(new Error("Realtime connection limit reached."));
       return;
@@ -140,12 +152,14 @@ export const createSocketIoIntegration = ({
       .then((identity) => {
         if (!identity) {
           releaseIpSlot();
+          telemetry?.recordConnectionAttempt("failure");
           logger.warn("Realtime connection rejected.", { reason: "unauthenticated" });
           next(new Error("Authentication required."));
           return;
         }
         if ((connectionsByUser.get(identity.id) ?? 0) >= configuredLimits.connectionsPerUser) {
           releaseIpSlot();
+          telemetry?.recordConnectionAttempt("failure");
           logger.warn("Realtime connection rejected.", { reason: "user_connection_limit" });
           next(new Error("Realtime connection limit reached."));
           return;
@@ -183,6 +197,7 @@ export const createSocketIoIntegration = ({
       })
       .catch((error: unknown) => {
         releaseIpSlot();
+        telemetry?.recordConnectionAttempt("failure");
         logger.error("Realtime authentication failed.", {
           error: error instanceof Error ? error.message : "Unknown authentication error."
         });
@@ -191,6 +206,18 @@ export const createSocketIoIntegration = ({
   });
 
   io.on("connection", (socket) => {
+    const connectedAt = performance.now();
+    telemetry?.recordConnectionAttempt("success");
+    telemetry?.recordConnectionOpened();
+    socket.onAny((eventName: unknown) => {
+      if (typeof eventName === "string") telemetry?.recordEvent("received", eventName);
+    });
+    socket.onAnyOutgoing((eventName: unknown) => {
+      if (typeof eventName === "string") telemetry?.recordEvent("emitted", eventName);
+    });
+    socket.once("disconnect", () => {
+      telemetry?.recordConnectionClosed((performance.now() - connectedAt) / 1000);
+    });
     let revalidationInProgress = false;
     const revalidationTimer = setInterval(() => {
       if (revalidationInProgress || !socket.connected) return;

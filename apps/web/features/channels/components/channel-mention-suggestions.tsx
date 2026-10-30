@@ -16,8 +16,8 @@ const initials = (name: string): string => name.trim().split(/\s+/).slice(0, 2)
 export const ChannelMentionSuggestions = ({
   activeIndex, members, onRetry, onSelect, status
 }: ChannelMentionSuggestionsProps): ReactElement => (
-  <div aria-label="Channel members" className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl" id="channel-mention-options" role="listbox">
-    {status === "loading" ? <p className="px-3 py-2 text-sm text-muted-foreground" role="status">Loading channel members…</p> : null}
+  <div aria-label="Members to mention" className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl" id="channel-mention-options" role="listbox">
+    {status === "loading" ? <p className="px-3 py-2 text-sm text-muted-foreground" role="status">Loading members…</p> : null}
     {status === "error" ? (
       <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
         <span className="text-muted-foreground">Members could not load.</span>

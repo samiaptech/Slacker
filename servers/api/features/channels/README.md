@@ -37,7 +37,40 @@ Channel details and message history are member-only: public discovery alone gran
 
 Messages are retained when a user leaves or loses membership. An inaccessible channel returns the same privacy-safe `route_not_found` response as channel details. Archived channels remain readable to their members, but cannot accept new messages. Authenticated Socket.IO subscriptions deliver persisted messages and membership/list updates to authorized channel and workspace rooms. The message history REST API remains authoritative; on reconnect the client re-subscribes and reloads history to recover events missed while offline.
 
-`pnpm --filter @workspace/api channels:initialize` now also installs the strict `channel_messages` collection validator and the `channel_messages_chronological` and `channel_messages_text` indexes. Deploy this API version and run the initializer before enabling messaging or search against an existing database. The runtime account needs read/write access; the initializer additionally needs collection and index administration privileges. Transaction-backed sends require a MongoDB replica set or sharded cluster. Initialization failure must be corrected before use; the API returns `channel_storage_unavailable` when the message migration is absent or its validator/index differs from the expected definition.
+`pnpm --filter @workspace/api channels:initialize` installs the strict `channel_messages` collection validator and its chronological, thread-reply, and text indexes. Deploy this API version and run the initializer before enabling messaging or search against an existing database. The runtime account needs read/write access; the initializer additionally needs collection and index administration privileges. Transaction-backed sends require a MongoDB replica set or sharded cluster. Initialization failure must be corrected before use; the API returns `channel_storage_unavailable` when the message migration is absent or its validator/index differs from the expected definition.
+
+## Channel threads
+
+Threads are one level deep and available in channels only. Root messages remain in
+`GET /channels/:channelId/messages`; replies never appear in that main timeline.
+`GET /channels/:channelId/messages/:messageId/replies` returns `{ root, replies,
+nextCursor }`, with `limit` (1–100, default 50) and the standard opaque `before`
+cursor for older replies. The root includes `thread: null` when empty or
+`{ replyCount, lastReplyAt }` after the first reply. Replies include their
+`threadRootId` and `thread: null`.
+
+Post a reply to
+`POST /channels/:channelId/messages/:messageId/replies` using the same JSON
+`{ "text": "..." }` or multipart `text`/`files` format and limits as a channel
+message. The response is `{ "reply": ChannelMessageResponse, "thread":
+{ "replyCount": 1, "lastReplyAt": "<ISO timestamp>" } }`. Only a current channel
+member can read or write a thread; the root must be a visible, non-system root
+message. Replying to a reply is rejected as unavailable. Reactions, edits,
+per-user hides, attachments, and author/admin deletion rules apply to replies.
+Deleting a root for everyone cascades to all its replies and removes their
+reactions and private attachment assets; hiding a root for oneself hides access
+to its thread without changing other members' view.
+
+The API persists each reply in `channel_messages` with `threadRootId`; the root
+stores its reply count and latest reply time in the same transaction. Replies
+are emitted only as `channel:thread:reply:new`, never as `channel:message:new`.
+Thread reply notifications go to current channel members who participated in
+the thread and to explicitly mentioned members, subject to their channel
+notification preference. Opening the reply history marks notifications for
+that thread read; opening the main channel history does not clear thread reply
+notifications. Search results for replies include `threadRootId` so clients can
+open the containing thread. Run `channels:initialize` after deployment to
+install the updated validator and reply index.
 
 `DELETE /channels/:channelId/messages/:messageId` accepts strict JSON `{ "scope": "me" | "everyone" }` and returns `204 No Content`. `me` persists a per-user hide for any current channel member; hidden messages are excluded from that member's history, search results, and attachment downloads but remain visible to everyone else. `everyone` is allowed only to the message author or a workspace administrator, and still requires current workspace and channel membership. It physically removes the message, cleans up private Cloudinary attachments, and emits `channel:message:deleted` with `{ "channelId": "...", "messageId": "..." }` to the authorized channel room. Cleanup failures return `message_delete_cleanup_failed` rather than success; the error explicitly states that the message deletion was committed, and the deletion event is still broadcast. Personal hides do not emit a realtime event; the requesting client removes the message locally and subsequent history requests remain filtered. Run `channels:initialize` after deploying the validator change.
 

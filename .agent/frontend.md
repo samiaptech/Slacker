@@ -87,7 +87,10 @@ panel ke saath jorta hai. Bari screen par About panel conversation ke saath hota
 header mein channel name click karne se panel khulta/band hota hai; iske liye doosra channel-name
 header nahi banaya gaya. Chhoti screen par channel name alag About route kholta hai, jis se
 conversation ke liye zyada jagah rehti hai. Private channels mein About view ke andar member
-controls hain; public channel ke members pehle se mojood workspace-member data se aate hain.
+controls hain; public channel ke members pehle se mojood workspace-member data se aate hain. About
+panel ke neeche `Leave channel` action existing workspace confirmation dialog aur membership
+request reuse karta hai; leave ke baad current channel ya About route se Overview par redirect hota
+hai.
 
 - [Channel route](apps/web/app/(app)/channels/[channelId]/page.tsx)
 - [Mobile aur desktop ka dedicated About route](apps/web/app/(app)/channels/[channelId]/about/page.tsx)
@@ -96,6 +99,7 @@ controls hain; public channel ke members pehle se mojood workspace-member data s
 - [About content aur members ki presentation](apps/web/features/channels/components/channel-profile-content.tsx)
 - [Private channel membership controls](apps/web/features/channels/components/channel-members-panel.tsx)
 - [About panel toggle ki shared state](apps/web/features/channels/components/channel-profile-toggle-context.tsx)
+- [About aur sidebar se shared channel-leave confirmation flow](apps/web/features/channels/components/channel-leave-context.tsx), [workspace action/dialog](apps/web/features/channels/components/channel-workspace.tsx)
 - [Channel banane ka dialog](apps/web/features/channels/components/create-channel-dialog.tsx)
 
 Channel metadata load hote waqt loading state sirf conversation pane mein aati hai aur shared
@@ -276,8 +280,15 @@ Account profile mein workspace theme wala identity card, editable display name/t
 visibility controls aur admin invite settings hain. Doosre members ke profiles mein identity,
 role, member-since, ijazat-shuda email/title details aur alag admin management controls hain.
 Loading, unavailable, retry aur unauthorized states main content pane ke andar rehti hain.
+Profile page se JPEG, PNG ya WebP (5 MB tak) photo upload/change hoti hai. Upload ke dauran local
+preview dikhta hai; success par signed-in user context foran update hota hai, aur failure par
+purani photo rehti hai. Shared `UserAvatar` component uploaded photo aur broken-image fallback ko
+workspace rail/sidebar/member list, channel/DM message rows, channel members aur member profiles
+mein dikhata hai. Web CSP Cloudinary ke exact image host ko allow karti hai.
 
 - [Account profile aur settings](apps/web/features/identity/components/profile-page.tsx)
+- [Profile image upload, preview aur error states](apps/web/features/identity/components/profile-image-control.tsx)
+- [Shared member avatar with initials fallback](apps/web/features/identity/components/user-avatar.tsx)
 - [Member profile route](apps/web/app/(app)/members/[userId]/page.tsx)
 - [Member profile data, loading state aur controls](apps/web/features/identity/components/workspace-member-profile.tsx)
 - [Member identity card](apps/web/features/identity/components/workspace-member-profile-card.tsx)
@@ -326,6 +337,16 @@ mein restore hota hai, taake padhne ki jagah jump na kare.
   isliye composer mein type karne se poori timeline dobara nahi banti. Dekho [channel messages](apps/web/features/channels/components/channel-messages.tsx), [channel row](apps/web/features/channels/components/channel-message-item.tsx) aur [DM row](apps/web/features/direct-messages/components/direct-message-item.tsx).
 - **Bootstrap ki duplicate fetch rokna:** Wapas aane wale workspace sessions saved access ko
   workspace list ke saath load karte hain. Dekho [workspace access](apps/web/features/identity/components/workspace-access.tsx).
+- **Development mein Strict Mode ke repeated GETs:** React Strict Mode effect ko cleanup karke
+  foran dobara chalata hai. Workspace bootstrap, channel metadata, mentions, channel members,
+  aur notification preference ke GET requests ab in-flight deduplication istemal karte hain;
+  foran cleanup ke baad agla effect usi request ko reuse karta hai. Asli route change par
+  request tab abort hoti hai jab koi active consumer na bache. Dekho [shared GET helper](apps/web/app/fetch-shared-get.ts).
+- **Response time ki had:** Browser capture mein sabse lamba successful request channel history ka
+  taqreeban 1.08 second tha. Yeh server/API response time hai; frontend request deduplication
+  canceled duplicate calls ghatati hai, lekin cold history query ko 0.4–0.5 second tak lane ke
+  liye backend/database profiling chahiye. Requests parallel hoti hain, is liye unke durations
+  ko seedha jama karke total page-load time nahi samajhna chahiye.
 - **Notification count ko stable rakhna:** Socket.IO pehli baar connect ho to notification
   inbox foran dobara fetch nahi hota; reconnect par inbox aur unread count refresh hote hain.
   Dekho [notification state](apps/web/features/notifications/use-notifications.ts).
@@ -451,23 +472,27 @@ and realtime synchronization in a populated workspace after API deployment.
 
 ## 13. Channel @mentions — frontend
 
-Channel composer mein `@` likhne par member picker current channel ke members ko dikhata hai.
-Member list `GET /channels/:channelId/mention-members` se channel/workspace scope par ek martaba
-load hoti hai; typing par network request nahi hoti. Search browser mein naam ke mutabiq hoti
-hai. Arrow keys se option badalta hai, Enter select karta hai, Escape list band karta hai; mouse
-selection bhi kaam karti hai. Loading, no-match aur retry states picker ke andar rehte hain.
+Channel, thread aur DM composer mein mention icon dabane se member picker khulta hai; `@` likhne
+par bhi filtered list khulti hai. Channel/thread ke members `GET /channels/:channelId/mention-members`
+se load hote hain; typing par network request nahi hoti. DM picker mein us conversation ka doosra
+member hota hai. Search browser mein naam ke mutabiq hoti hai. Arrow keys se option badalta hai,
+Enter select karta hai, Escape list band karta hai; mouse selection bhi kaam karti hai. Loading,
+no-match aur retry states picker ke andar rehte hain.
 
 Selection composer mein `@Member Name` dikhati hai, jabke React state mein backend contract wala
 `@[member-id] ` token rehta hai; isliye send ke waqt maujooda notification flow ko sahi token
 milta hai. Draft mein text edit karne se pehle se select hue mention IDs bhi preserve rehte hain.
-Channel messages mein token current member ke naam aur highlighted style mein render hota hai;
-member ab channel mein na ho to `@Former member` fallback dikhta hai. Direct messages mein mention
-picker nahi hai, kyunki backend contract channel membership ke liye hai.
+Channel, thread aur DM messages mein token member name aur highlighted style mein render hota hai;
+member ab available na ho to `@Former member` fallback dikhta hai. Channel/thread mentions existing
+notification behavior istemal karte hain. DM mention UI recipient ko tag karti hai, lekin DM mention
+notification backend behavior maujood nahi; backend owner ko is integration par kaam karna hoga.
 
 - [Member fetch, local filtering, selection aur keyboard behavior](apps/web/features/channels/components/use-channel-mentions.ts)
 - [Mention suggestion list aur loading/error states](apps/web/features/channels/components/channel-mention-suggestions.tsx)
 - [Stored mention token ka readable message rendering](apps/web/features/channels/components/channel-message-text.tsx)
 - [Channel composer aur message-row integration](apps/web/features/channels/components/channel-messages.tsx), [message row](apps/web/features/channels/components/channel-message-item.tsx)
+- [Thread composer aur reply rendering](apps/web/features/channels/components/channel-thread-composer.tsx), [thread messages](apps/web/features/channels/components/channel-thread-message.tsx)
+- [DM composer integration](apps/web/features/direct-messages/components/direct-message-page.tsx), [DM message rendering](apps/web/features/direct-messages/components/direct-message-item.tsx)
 
 Web TypeScript check aur focused ESLint zero warnings/errors ke saath pass hue. Populated browser
 session mein interaction verification abhi nahi hui. Frontend tabdeeliyan local aur uncommitted
@@ -522,4 +547,41 @@ apni default preference lete hain. Koi backend code ya contract nahi badla.
 
 Web TypeScript check aur focused ESLint pass hue. Browser mein profile save aur multiple-channel
 bulk update ka manual verification abhi baqi hai. Changes local aur uncommitted hain; backend
+files nahi chheri gayin.
+
+## 16. Channel threads — frontend
+
+Root channel messages par thread control hai; one-level replies main timeline mein add nahi hotin.
+Thread icon aur reply count message ke text/reaction row mein rehte hain, header ki alag jagah nahi
+lete. Thread panel ko compact width, header, message spacing aur composer diya gaya hai taa-ke chat
+area zyada khula rahe.
+Thread kholne par side panel desktop par conversation ke saath aur mobile par full-screen panel ke
+tor par aata hai. Panel root ko authorized replies endpoint se load karta, cursor ke zariye purani
+replies mangta, aur reply composer text ya backend-supported attachments multipart mein bhejta hai.
+Send dabate hi reply pending state ke saath foran thread mein dikh jata hai; HTTP response ya
+realtime event aane par woh saved reply se reconcile hota hai. Failure par reply unsent state mein
+rehkar retry option deta hai.
+Successful HTTP response aur `channel:thread:reply:new` dono ID ke zariye merge hote hain, isliye
+double reply nahi banti. Thread count/latest time root row par refresh hota hai. Live edit, delete,
+reaction events panel ke root aur reply rows mein reconcile hote hain; actions wahi existing
+channel API aur shared message controls istemal karte hain.
+Channel history refresh ke waqt pehle se loaded messages visible rehte hain; loading state sirf
+us waqt aati hai jab channel history pehli martaba load ho rahi ho.
+
+Search reply chunne par channel route par root thread khulta aur us reply tak cursor pages load
+hote hain; notification par seedha thread root khulta hai. Thread preference/notification read
+backend ke thread-specific behavior ke zariye hi hota hai. Reply/member/access API ya server code
+mein tabdeeli nahi ki.
+
+- [Thread panel, API reads/writes aur realtime listeners](apps/web/features/channels/components/channel-thread-panel.tsx)
+- [Thread history pagination aur realtime reconciliation](apps/web/features/channels/components/use-channel-thread-data.ts)
+- [Reply composer aur file limits](apps/web/features/channels/components/channel-thread-composer.tsx)
+- [Thread message controls aur authorized attachment rendering](apps/web/features/channels/components/channel-thread-message.tsx)
+- [Edit/delete/reaction mutations](apps/web/features/channels/components/use-channel-thread-actions.ts)
+- [Root message thread action aur panel mounting](apps/web/features/channels/components/channel-message-item.tsx), [timeline integration](apps/web/features/channels/components/channel-messages.tsx)
+- [Thread contract parsing](apps/web/features/channels/types/channel-message-response.ts)
+- [Search/notification routing](apps/web/features/channels/components/workspace-search-dialog.tsx), [notification navigation](apps/web/features/channels/components/channel-workspace.tsx)
+
+Web TypeScript check aur focused ESLint zero errors/warnings ke saath pass hue. Browser mein
+populated workspace par manual verification baqi hai. Changes local aur uncommitted hain; backend
 files nahi chheri gayin.

@@ -18,7 +18,7 @@ export const createWebContentSecurityPolicy = ({
     `style-src 'self' 'nonce-${nonce}'`,
     `style-src-elem 'self'${production ? ` 'nonce-${nonce}'` : " 'unsafe-inline'"}`,
     "style-src-attr 'unsafe-inline'",
-    "img-src 'self' data: blob: https://*.googleusercontent.com",
+    "img-src 'self' data: blob: https://*.googleusercontent.com https://res.cloudinary.com",
     "font-src 'self' data:",
     `connect-src 'self' ${apiUrl.origin} ${socketUrl.origin}`,
     "media-src 'self'",

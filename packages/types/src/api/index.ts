@@ -39,6 +39,9 @@ export type {
   ChannelHistoryEntryResponse,
   ChannelMessageListResponse,
   ChannelMessageResponse,
+  ChannelThreadSummaryResponse,
+  ChannelThreadResponse,
+  ChannelThreadReplyResponse,
   ChannelSystemEventResponse
 } from "./channels/index.js";
 export type {

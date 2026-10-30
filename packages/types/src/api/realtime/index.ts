@@ -1,4 +1,8 @@
-import type { ChannelMessageResponse, ChannelSystemEventResponse } from "../channels/index.js";
+import type {
+  ChannelMessageResponse,
+  ChannelSystemEventResponse,
+  ChannelThreadSummaryResponse
+} from "../channels/index.js";
 import type { DirectMessageResponse } from "../direct-messages/index.js";
 import type { NotificationResponse } from "./notifications.js";
 import type { MessageReactionToggleResponse } from "../chat/index.js";
@@ -30,6 +34,12 @@ export type RealtimeServerEvents = Readonly<{
   "workspace:members:changed": () => void;
   "workspace:access:revoked": (payload: Readonly<{ workspaceId: string }>) => void;
   "channel:message:new": (message: ChannelMessageResponse) => void;
+  "channel:thread:reply:new": (payload: Readonly<{
+    channelId: string;
+    rootMessageId: string;
+    reply: ChannelMessageResponse;
+    thread: ChannelThreadSummaryResponse;
+  }>) => void;
   "channel:message:updated": (message: ChannelMessageResponse) => void;
   "channel:system:new": (entry: ChannelSystemEventResponse) => void;
   "channel:message:deleted": (payload: Readonly<{ channelId: string; messageId: string }>) => void;

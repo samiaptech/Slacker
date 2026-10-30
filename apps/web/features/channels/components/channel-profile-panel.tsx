@@ -3,13 +3,16 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import type { Route } from "next";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
+import { Button } from "@workspace/ui";
 import { workspaceMembersSchema } from "@/features/identity/public";
 import { channelMembersResponseSchema } from "../types";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
 import { useChannelRealtime } from "./channel-realtime-provider";
 import { ChannelProfileContent, type ChannelProfileMemberView } from "./channel-profile-content";
 import { ChannelNotificationPreferences } from "./channel-notification-preferences";
+import { useChannelLeaveRequest } from "./channel-leave-context";
+import { fetchSharedGet } from "@/app/fetch-shared-get";
 
 type ChannelProfilePanelProps = Readonly<{
   apiBaseUrl: string;
@@ -35,6 +38,7 @@ export const ChannelProfilePanel = ({
   isPage = false
 }: ChannelProfilePanelProps): ReactElement => {
   const { activeWorkspace } = useWorkspaceContext();
+  const requestLeaveChannel = useChannelLeaveRequest();
   const realtime = useChannelRealtime();
   const [members, setMembers] = useState<Readonly<{
     canManage: boolean;
@@ -71,7 +75,7 @@ export const ChannelProfilePanel = ({
         const memberPath = visibility === "public"
           ? "/workspace/members"
           : `/channels/${encodeURIComponent(channelId)}/memberships`;
-        const response = await fetch(new URL(memberPath, apiBaseUrl), {
+        const response = await fetchSharedGet(new URL(memberPath, apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           headers: { "X-Workspace-Id": activeWorkspace.id },
@@ -134,6 +138,14 @@ export const ChannelProfilePanel = ({
           enabled={isPage || isOpen}
           workspaceId={activeWorkspace.id}
         />
+      )}
+      channelActions={(
+        <section className="border-t border-[#e6e9e2] px-4 py-4">
+          <Button className="w-full justify-start border-[#ead4d0] text-[#a0443d] hover:bg-[#fff3f1] hover:text-[#8e3732]" onClick={() => requestLeaveChannel({ id: channelId, name: channelName })} type="button" variant="outline">
+            <LogOut aria-hidden="true" className="size-4" /> Leave channel
+          </Button>
+          <p className="mt-2 px-1 text-xs leading-relaxed text-[#879089]">You can rejoin later if the channel is public.</p>
+        </section>
       )}
       onRetry={() => setReloadToken((current) => current + 1)}
       visibility={visibility}

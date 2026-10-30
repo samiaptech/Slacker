@@ -12,6 +12,7 @@ export type MessageSearchCandidate = Readonly<{
   text: string;
   createdAt: Date;
   score: number;
+  threadRootId?: string;
   conversation:
     | Readonly<{ type: "channel"; id: string; name: string }>
     | Readonly<{ type: "direct"; id: string; otherParticipantId: string }>;

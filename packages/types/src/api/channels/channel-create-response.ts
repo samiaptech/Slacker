@@ -81,11 +81,29 @@ export type ChannelMessageResponse = Readonly<{
   editedAt?: string | null;
   attachments?: readonly ChatAttachmentResponse[];
   reactions: readonly MessageReactionResponse[];
+  threadRootId?: string | null;
+  thread?: ChannelThreadSummaryResponse | null;
   sender: Readonly<{
     id: string;
     name: string;
     image: string | null;
   }>;
+}>;
+
+export type ChannelThreadSummaryResponse = Readonly<{
+  replyCount: number;
+  lastReplyAt: string;
+}>;
+
+export type ChannelThreadResponse = Readonly<{
+  root: ChannelMessageResponse;
+  replies: readonly ChannelMessageResponse[];
+  nextCursor: string | null;
+}>;
+
+export type ChannelThreadReplyResponse = Readonly<{
+  reply: ChannelMessageResponse;
+  thread: ChannelThreadSummaryResponse;
 }>;
 
 export type ChannelSystemEventResponse = Readonly<{

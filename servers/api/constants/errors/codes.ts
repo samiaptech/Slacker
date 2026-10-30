@@ -15,6 +15,8 @@ export const ERROR_CODES = Object.freeze({
   channelMembershipConflict: "channel_membership_conflict",
   directMessageStorageUnavailable: "direct_message_storage_unavailable",
   chatAttachmentStorageUnavailable: "chat_attachment_storage_unavailable",
+  profileImageStorageUnavailable: "profile_image_storage_unavailable",
+  profileImageUpdateFailed: "profile_image_update_failed",
   messageDeleteForbidden: "message_delete_forbidden",
   messageDeleteCleanupFailed: "message_delete_cleanup_failed",
   messageEditForbidden: "message_edit_forbidden",

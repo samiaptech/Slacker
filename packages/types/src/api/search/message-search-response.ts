@@ -1,5 +1,6 @@
 export type MessageSearchResult = Readonly<{
   id: string;
+  threadRootId?: string | null;
   snippet: string;
   createdAt: string;
   sender: Readonly<{ id: string; name: string; image: string | null }>;

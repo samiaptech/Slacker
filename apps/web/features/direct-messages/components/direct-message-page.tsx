@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
-import { FileText, Paperclip, Send, X } from "lucide-react";
+import { AtSign, FileText, Paperclip, Send, X } from "lucide-react";
+import type { ChannelMentionMemberResponse } from "@workspace/types";
 import type { DirectMessageResponse, MessageReactionEmoji, MessageReactionResponse, MessageReactionToggleResponse } from "@workspace/types";
 import { Button, Textarea } from "@workspace/ui";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
-import { useChannelRealtime } from "@/features/channels/public";
+import { UserAvatar } from "@/features/identity/public";
+import { ChannelMentionSuggestions, useChannelMentions, useChannelRealtime } from "@/features/channels/public";
 import {
   directConversationResponseSchema,
   directMessageListResponseSchema,
@@ -106,6 +108,16 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
   const typingIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const mentionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionMembers = useMemo<readonly ChannelMentionMemberResponse[]>(() => conversation ? [{
+    id: conversation.otherParticipant.id,
+    name: conversation.otherParticipant.name,
+    image: conversation.otherParticipant.image
+  }] : [], [conversation]);
+  const messageMentionNames = useMemo(() => new Map([
+    [currentUser.id, currentUser.name || currentUser.email],
+    ...mentionMembers.map(({ id, name }) => [id, name] as const)
+  ]), [currentUser.email, currentUser.id, currentUser.name, mentionMembers]);
   const getEditableMessage = useCallback((messageId: string): DirectMessageView | undefined =>
     messages.find((message) => message.id === messageId), [messages]);
   const updateEditedMessage = useCallback((updated: DirectMessageView): void => {
@@ -282,8 +294,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
     shouldScrollRef.current = false;
   }, [messages]);
 
-  const onDraftChange = (value: string): void => {
-    setDraft(value);
+  const updateTyping = (value: string): void => {
     const active = value.trim().length > 0;
     if (active === isTypingRef.current) return;
     isTypingRef.current = active;
@@ -296,6 +307,16 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
       }, 1_500);
     }
   };
+
+  const mentions = useChannelMentions({
+    apiBaseUrl,
+    workspaceId: activeWorkspace.id,
+    value: draft,
+    onValueChange: setDraft,
+    onTyping: updateTyping,
+    textareaRef: mentionTextareaRef,
+    providedMembers: mentionMembers
+  });
 
   const submitMessage = async (pending: DirectTimelineMessage): Promise<void> => {
     setIsSending(true);
@@ -579,7 +600,11 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
         <>
           <p aria-live="polite" className="sr-only" role="status">{searchJump.announcement}</p>
           <section aria-label={`Conversation with ${conversation.otherParticipant.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf8]">
-            <header className="flex shrink-0 items-center justify-end gap-3 border-b border-[#e9e7e1] px-6 py-2 sm:px-8">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e9e7e1] px-6 py-2 sm:px-8">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <UserAvatar className="size-9 shrink-0 rounded-full bg-[#e8eee8] text-xs font-semibold text-[#486653]" image={conversation.otherParticipant.image} name={conversation.otherParticipant.name} />
+                <h1 className="truncate text-sm font-semibold text-[#293a32]">{conversation.otherParticipant.name}</h1>
+              </div>
               <p className="flex items-center gap-2 text-xs text-[#74817b]" role="status">
                 <span aria-hidden="true" className={`size-2 rounded-full ${realtime.status === "connected" ? "bg-emerald-500" : "bg-amber-400"}`} />
                 {realtime.status === "connected" ? "Live updates" : "Reconnecting to live chat…"}
@@ -618,6 +643,7 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                       currentUserName={currentUser.name || currentUser.email}
                       editDraft={messageEdit.editingMessageId === message.id ? messageEdit.draft : message.text}
                       message={message}
+                      memberNames={messageMentionNames}
                       onCancelEdit={messageEdit.cancelEdit}
                       onDelete={(scope) => { void deleteMessage(message.id, scope); }}
                       onDownloadAttachment={downloadAttachment}
@@ -657,17 +683,31 @@ export const DirectMessagePage = ({ apiBaseUrl, conversationId }: DirectMessageP
                 <Button aria-label="Attach files, up to 5 files and 10 MB each" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending} onClick={() => attachmentInputRef.current?.click()} size="icon" title="Up to 5 files · 10 MB each" type="button" variant="ghost">
                   <Paperclip aria-hidden="true" className="size-4" />
                 </Button>
+                <Button aria-label="Mention the other participant" className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending} onClick={mentions.open} onMouseDown={(event) => event.preventDefault()} size="icon" title="Mention the other participant" type="button" variant="ghost">
+                  <AtSign aria-hidden="true" className="size-4" />
+                </Button>
+                <div className="relative min-w-0 flex-1">
+                  {mentions.range ? <ChannelMentionSuggestions activeIndex={mentions.activeIndex} members={mentions.suggestions} onRetry={mentions.reload} onSelect={mentions.selectMember} status={mentions.status} /> : null}
                 <Textarea
+                  aria-activedescendant={mentions.range && mentions.suggestions.length > 0 ? `channel-mention-option-${mentions.activeIndex}` : undefined}
+                  aria-autocomplete="list"
+                  aria-controls={mentions.range ? "channel-mention-options" : undefined}
+                  aria-expanded={Boolean(mentions.range)}
                   aria-label="Write a direct message"
                   className="max-h-36 min-h-12 resize-none border-0 shadow-none focus-visible:ring-0"
                   id="direct-message-draft"
                   maxLength={DIRECT_MESSAGE_MAX_LENGTH}
-                  onChange={(event) => onDraftChange(Array.from(event.currentTarget.value).slice(0, DIRECT_MESSAGE_MAX_LENGTH).join(""))}
-                  onKeyDown={onComposerKeyDown}
+                  onBlur={mentions.close}
+                  onChange={(event) => { if (Array.from(event.currentTarget.value).length <= DIRECT_MESSAGE_MAX_LENGTH) mentions.onChange(event); }}
+                  onClick={mentions.updateCaret}
+                  onKeyDown={(event) => mentions.onKeyDown(event, onComposerKeyDown)}
+                  onKeyUp={mentions.updateCaret}
                   placeholder={`Message ${conversation.otherParticipant.name}…`}
                   rows={1}
-                  value={draft}
+                  ref={mentionTextareaRef}
+                  value={mentions.displayValue}
                 />
+                </div>
                 <Button aria-label={isSending ? "Sending message" : "Send direct message"} className="mb-0.5 size-10 shrink-0 rounded-xl" disabled={isSending || (!draft.trim() && selectedFiles.length === 0)} size="icon" type="submit">
                   <Send aria-hidden="true" className="size-4" />
                 </Button>

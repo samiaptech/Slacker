@@ -1,7 +1,8 @@
 import { memo, type ReactElement } from "react";
-import Image from "next/image";
 import { FileText } from "lucide-react";
 import type { MessageReactionEmoji } from "@workspace/types";
+import { ChannelMessageText } from "@/features/channels/public";
+import { UserAvatar } from "@/features/identity/public";
 import {
   MessageActions,
   MessageAttachmentList,
@@ -33,6 +34,7 @@ type DirectMessageItemProps = Readonly<{
   isReactionPending: boolean;
   currentUserId: string;
   currentUserName: string;
+  memberNames: ReadonlyMap<string, string>;
   editDraft: string;
   onDownloadAttachment: (attachment: DirectMessageAttachment) => void;
   loadImagePreview: (attachment: MessageAttachment, signal: AbortSignal) => Promise<string>;
@@ -49,9 +51,6 @@ const formatMessageTime = (value: string): string =>
 
 const formatMessageDay = (value: string): string =>
   new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date(value));
-
-const getInitials = (name: string): string =>
-  name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?";
 
 const formatFileSize = (size: number): string => size < 1024 * 1024
   ? `${Math.max(1, Math.round(size / 1024))} KB`
@@ -76,6 +75,7 @@ const DirectMessageItemView = ({
   isReactionPending,
   currentUserId,
   currentUserName,
+  memberNames,
   editDraft,
   onDelete,
   onEdit,
@@ -93,11 +93,7 @@ const DirectMessageItemView = ({
       </li>
     ) : null}
     <li className="group flex items-start gap-3" data-message-id={message.id}>
-      <span aria-hidden="true" className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-xs font-semibold text-primary">
-        {message.sender.image
-          ? <Image alt="" className="object-cover" height={36} src={message.sender.image} unoptimized width={36} />
-          : getInitials(message.sender.name)}
-      </span>
+      <UserAvatar className="mt-0.5 size-9 shrink-0 bg-primary/10 text-xs font-semibold text-primary" image={message.sender.image} name={message.sender.name} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-foreground">{message.sender.name}</span>
@@ -125,7 +121,7 @@ const DirectMessageItemView = ({
           />
         ) : message.text ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <p className="w-fit max-w-full whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{message.text}</p>
+            <ChannelMessageText memberNames={memberNames} text={message.text} />
             {!deliveryState ? <MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /> : null}
           </div>
         ) : !deliveryState ? <div className="mt-1"><MessageReactions currentUserId={currentUserId} currentUserName={currentUserName} isPending={isReactionPending} onToggle={onToggleReaction} reactions={message.reactions} /></div> : null}

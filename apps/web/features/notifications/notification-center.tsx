@@ -29,6 +29,7 @@ type NotificationCenterProps = Readonly<{
 const notificationAction = (type: NotificationType): string => {
   switch (type) {
     case "channel_message": return "sent a message in";
+    case "channel_thread_reply": return "replied in a thread in";
     case "direct_message": return "sent you a direct message";
     case "mention": return "mentioned you in";
     case "channel_member_joined": return "joined";

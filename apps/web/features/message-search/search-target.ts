@@ -2,6 +2,7 @@ export type MessageSearchTarget = Readonly<{
   type: "channel" | "direct";
   conversationId: string;
   messageId: string;
+  threadRootId?: string;
 }>;
 
 export const MESSAGE_SEARCH_TARGET_EVENT = "nutshyll:message-search-target";
@@ -21,10 +22,14 @@ export const parseMessageSearchTarget = (value: string | null): MessageSearchTar
     if ((target.type !== "channel" && target.type !== "direct")
       || typeof target.conversationId !== "string" || !target.conversationId
       || typeof target.messageId !== "string" || !target.messageId) return null;
+    const threadRootId = typeof target.threadRootId === "string" && target.threadRootId
+      ? target.threadRootId
+      : undefined;
     return Object.freeze({
       type: target.type,
       conversationId: target.conversationId,
-      messageId: target.messageId
+      messageId: target.messageId,
+      ...(threadRootId ? { threadRootId } : {})
     });
   } catch {
     return null;
@@ -44,7 +49,7 @@ export const saveMessageSearchTarget = (target: MessageSearchTarget): void => {
 export const takeMessageSearchTarget = (
   type: MessageSearchTarget["type"],
   conversationId: string
-): string | null => {
+): MessageSearchTarget | null => {
   let storedTarget: MessageSearchTarget | null = null;
   try {
     storedTarget = parseMessageSearchTarget(window.sessionStorage?.getItem(STORAGE_KEY) ?? null);
@@ -59,5 +64,5 @@ export const takeMessageSearchTarget = (
   } catch {
     // Removing persisted state is best-effort; the in-memory target is consumed.
   }
-  return target.messageId;
+  return target;
 };

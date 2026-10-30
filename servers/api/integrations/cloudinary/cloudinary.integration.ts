@@ -22,6 +22,18 @@ export type ChatAttachmentIntegration = Readonly<{
   download: (attachment: ChatAttachmentRecord) => Promise<Buffer>;
 }>;
 
+export type ProfileImageAsset = Readonly<{
+  image: string;
+  publicId: string;
+}>;
+
+export type ProfileImageStorage = Readonly<{
+  uploadProfileImage: (buffer: Buffer) => Promise<ProfileImageAsset>;
+  deleteProfileImage: (asset: ProfileImageAsset) => Promise<void>;
+}>;
+
+export type CloudinaryIntegration = ChatAttachmentIntegration & ProfileImageStorage;
+
 const uploadBuffer = (
   buffer: Buffer,
   options: UploadApiOptions
@@ -45,7 +57,7 @@ export const normalizeCloudinaryFormat = (format: unknown, fileName: string): st
 
 export const createCloudinaryIntegration = (
   configuration: CloudinaryConfiguration
-): ChatAttachmentIntegration => {
+): CloudinaryIntegration => {
   cloudinary.config({
     cloud_name: configuration.cloudName,
     api_key: configuration.apiKey,
@@ -54,6 +66,38 @@ export const createCloudinaryIntegration = (
   });
 
   return Object.freeze({
+    uploadProfileImage: async (buffer) => {
+      const result = await uploadBuffer(buffer, {
+        folder: "nutshyll/profiles",
+        public_id: randomUUID(),
+        resource_type: "image",
+        type: "upload",
+        allowed_formats: ["jpg", "jpeg", "png", "webp"],
+        overwrite: false,
+        use_filename: false,
+        unique_filename: false
+      });
+      const url = new URL(result.secure_url);
+      if (url.protocol !== "https:" || url.hostname !== "res.cloudinary.com"
+        || url.username.length > 0 || url.password.length > 0) {
+        throw new Error("Cloudinary returned an unsafe profile image URL.");
+      }
+      return Object.freeze({ image: url.toString(), publicId: result.public_id });
+    },
+    deleteProfileImage: async (asset) => {
+      const result: unknown = await cloudinary.uploader.destroy(asset.publicId, {
+        resource_type: "image",
+        type: "upload",
+        invalidate: true
+      });
+      const status = typeof result === "object" && result !== null
+        && "result" in result && typeof result.result === "string"
+        ? result.result
+        : null;
+      if (status !== "ok" && status !== "not found") {
+        throw new Error(`Cloudinary profile image cleanup failed with status "${status ?? "unknown"}".`);
+      }
+    },
     upload: async (input) => {
       const validated = validateChatAttachment(input);
       if (!validated.ok) {

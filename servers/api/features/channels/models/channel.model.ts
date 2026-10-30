@@ -28,6 +28,9 @@ export type ChannelMessageDocument = Readonly<{
   text: string;
   createdAt: Date;
   editedAt?: Date | null;
+  threadRootId?: string;
+  threadReplyCount?: number;
+  threadLastReplyAt?: Date;
   type?: "message" | "system";
   systemEvent?: "member_left";
   actorId?: string;
@@ -143,6 +146,9 @@ export const CHANNEL_MESSAGES_COLLECTION_VALIDATOR = Object.freeze({
       text: Object.freeze({ bsonType: "string", minLength: 0, maxLength: 4000 }),
       createdAt: Object.freeze({ bsonType: "date" }),
       editedAt: Object.freeze({ bsonType: ["date", "null"] }),
+      threadRootId: Object.freeze({ bsonType: "string", minLength: 1, maxLength: 128 }),
+      threadReplyCount: Object.freeze({ bsonType: ["int", "long"], minimum: 0 }),
+      threadLastReplyAt: Object.freeze({ bsonType: "date" }),
       hiddenForUserIds: Object.freeze({
         bsonType: "array",
         uniqueItems: true,
@@ -211,6 +217,10 @@ export const CHANNEL_MESSAGES_INDEXES = Object.freeze([
   Object.freeze({
     keys: Object.freeze({ channelId: 1, createdAt: -1, _id: -1 }),
     options: Object.freeze({ name: "channel_messages_chronological", unique: false })
+  }),
+  Object.freeze({
+    keys: Object.freeze({ channelId: 1, threadRootId: 1, createdAt: -1, _id: -1 }),
+    options: Object.freeze({ name: "channel_thread_replies_chronological", unique: false })
   }),
   Object.freeze({
     keys: Object.freeze({ text: "text" }),

@@ -36,7 +36,10 @@ export type {
   ChannelMessageRepository,
   ChannelMessageEditResult,
   ChannelMessageEditStorageResult,
-  ChannelMessageStorage
+  ChannelMessageStorage,
+  ChannelThreadStorageResult,
+  ChannelThreadReplyStorageResult,
+  ChannelThreadReplyResult
 } from "./repositories/index.js";
 export { createMongoChannelStorage } from "./integrations/index.js";
 export { createMongoChannelMembershipCleanup } from "./integrations/index.js";
@@ -48,6 +51,7 @@ export type { ChannelRealtimePublisher } from "./realtime/index.js";
 export type {
   ChannelMessageService,
   ChannelMessagePageResult,
+  ChannelThreadPageResult,
   ChannelMessageWithSender,
   SendChannelMessageResult,
   EditChannelMessageResult

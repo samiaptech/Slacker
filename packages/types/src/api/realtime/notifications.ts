@@ -1,6 +1,7 @@
 export type NotificationType =
   | "channel_message"
   | "direct_message"
+  | "channel_thread_reply"
   | "mention"
   | "channel_member_joined"
   | "channel_member_left"
@@ -20,6 +21,7 @@ export type NotificationResponse = Readonly<{
   actor: Readonly<{ id: string; name: string }>;
   createdAt: string;
   readAt: string | null;
+  threadRootId?: string;
 }>;
 
 export type NotificationListResponse = Readonly<{

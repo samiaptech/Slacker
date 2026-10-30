@@ -38,6 +38,7 @@ The socket protocol is typed in the shared API realtime contracts.
 | Client to server | `channel:typing` | Send a short-lived typing state; identity comes from the socket |
 | Server to client | `workspace:ready`, `channel:ready` | Confirm authorized subscriptions |
 | Server to client | `channel:message:new` | Deliver a persisted message to channel members |
+| Server to client | `channel:thread:reply:new` | Deliver a persisted reply and updated thread summary without inserting it into the main timeline |
 | Server to client | `channel:message:updated` | Deliver an author-edited persisted message to channel members |
 | Server to client | `channel:members:changed` | Refresh the current channel member list |
 | Server to client | `workspace:channels:changed`, `workspace:members:changed` | Refresh workspace lists after successful changes |

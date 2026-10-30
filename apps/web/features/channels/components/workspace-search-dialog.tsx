@@ -52,13 +52,18 @@ export const WorkspaceSearchDialog = ({
     saveMessageSearchTarget({
       type: result.conversation.type,
       conversationId: result.conversation.id,
-      messageId: result.id
+      messageId: result.id,
+      ...(result.conversation.type === "channel" && result.threadRootId
+        ? { threadRootId: result.threadRootId }
+        : {})
     });
     onOpenChange(false);
     const path = result.conversation.type === "channel"
       ? `/channels/${encodeURIComponent(result.conversation.id)}`
       : `/messages/${encodeURIComponent(result.conversation.id)}`;
-    const target = new URLSearchParams({ message: result.id });
+    const target = result.conversation.type === "channel" && result.threadRootId
+      ? new URLSearchParams({ thread: result.threadRootId })
+      : new URLSearchParams({ message: result.id });
     router.push(`${path}?${target.toString()}` as Route);
     window.setTimeout(notifyMessageSearchTarget, 100);
   };

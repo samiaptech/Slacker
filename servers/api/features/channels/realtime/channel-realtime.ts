@@ -4,10 +4,15 @@ import type {
   ChannelMessageResponse,
   MessageReactionToggleResponse,
   RealtimeClientEvents,
-  RealtimeServerEvents
+  RealtimeServerEvents,
+  ChannelThreadSummaryResponse
 } from "@workspace/types";
 import type { Socket } from "socket.io";
-import type { SocketIoApi, AuthenticatedSocketData } from "../../../integrations/socket-io/index.js";
+import type {
+  AuthenticatedSocketData,
+  SocketIoApi,
+  SocketIoTelemetry
+} from "../../../integrations/socket-io/index.js";
 import type { AuthenticationIdentity } from "../../../integrations/authentication/index.js";
 import type { ChannelService } from "../services/index.js";
 import type { ChannelSystemEntry } from "../domain/index.js";
@@ -21,6 +26,13 @@ type ChannelSocket = Socket<
 
 export type ChannelRealtimePublisher = Readonly<{
   publishMessage: (workspaceId: string, channelId: string, message: ChannelMessageResponse) => void;
+  publishThreadReply?: (
+    workspaceId: string,
+    channelId: string,
+    rootMessageId: string,
+    reply: ChannelMessageResponse,
+    thread: ChannelThreadSummaryResponse
+  ) => void;
   publishMessageUpdated: (workspaceId: string, channelId: string, message: ChannelMessageResponse) => void;
   publishMessageDeleted: (workspaceId: string, channelId: string, messageId: string) => void;
   publishMessageReactions: (
@@ -44,6 +56,7 @@ type ChannelRealtimeDependencies = Readonly<{
     workspaceId: string
   ) => Promise<"allowed" | "denied" | "unavailable">;
   logger: Logger;
+  telemetry?: Pick<SocketIoTelemetry, "recordEventFailure">;
 }>;
 
 const workspaceIdSchema = z.string().trim().min(1).max(128);
@@ -62,8 +75,10 @@ const reportFailure = (
   socket: ChannelSocket,
   logger: Logger,
   event: string,
-  error: unknown
+  error: unknown,
+  telemetry?: Pick<SocketIoTelemetry, "recordEventFailure">
 ): void => {
+  telemetry?.recordEventFailure(event);
   logger.error("Realtime channel operation failed.", {
     event,
     error: error instanceof Error ? error.message : "Unknown realtime error."
@@ -78,7 +93,8 @@ export const createChannelRealtime = ({
   socketIo,
   channelService,
   getWorkspaceAccess,
-  logger
+  logger,
+  telemetry
 }: ChannelRealtimeDependencies): ChannelRealtimePublisher => {
   const { io } = socketIo;
   const onlineSockets = new Map<string, Map<string, Set<string>>>();
@@ -153,7 +169,7 @@ export const createChannelRealtime = ({
           });
         }
       })().catch((error: unknown) => {
-        reportFailure(socket, logger, "workspace:subscribe", error);
+        reportFailure(socket, logger, "workspace:subscribe", error, telemetry);
       });
     });
 
@@ -183,7 +199,7 @@ export const createChannelRealtime = ({
         await socket.join(channelRoom(workspaceId, parsedChannelId.data));
         socket.emit("channel:ready", { channelId: parsedChannelId.data });
       })().catch((error: unknown) => {
-        reportFailure(socket, logger, "channel:subscribe", error);
+        reportFailure(socket, logger, "channel:subscribe", error, telemetry);
       });
     });
 
@@ -242,7 +258,7 @@ export const createChannelRealtime = ({
           active: parsed.data.active
         });
       })().catch((error: unknown) => {
-        reportFailure(socket, logger, "channel:typing", error);
+        reportFailure(socket, logger, "channel:typing", error, telemetry);
       });
     });
 
@@ -251,7 +267,7 @@ export const createChannelRealtime = ({
       if (workspaceId) {
         void removeWorkspacePresence(socket, workspaceId)
           .catch((error: unknown) => {
-            reportFailure(socket, logger, "workspace:disconnect", error);
+            reportFailure(socket, logger, "workspace:disconnect", error, telemetry);
           });
       }
     });
@@ -260,6 +276,14 @@ export const createChannelRealtime = ({
   return Object.freeze({
     publishMessage: (workspaceId, channelId, message) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:message:new", message);
+    },
+    publishThreadReply: (workspaceId, channelId, rootMessageId, reply, thread) => {
+      io.to(channelRoom(workspaceId, channelId)).emit("channel:thread:reply:new", {
+        channelId,
+        rootMessageId,
+        reply,
+        thread
+      });
     },
     publishMessageUpdated: (workspaceId, channelId, message) => {
       io.to(channelRoom(workspaceId, channelId)).emit("channel:message:updated", message);

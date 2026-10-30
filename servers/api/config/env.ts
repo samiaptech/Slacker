@@ -24,5 +24,14 @@ export const readApiEnvironment = (
     : {}),
   ...(source.CLOUDINARY_API_SECRET !== undefined
     ? { CLOUDINARY_API_SECRET: source.CLOUDINARY_API_SECRET }
+    : {}),
+  ...(source.OTEL_EXPORTER_OTLP_ENDPOINT !== undefined
+    ? { OTEL_EXPORTER_OTLP_ENDPOINT: source.OTEL_EXPORTER_OTLP_ENDPOINT }
+    : {}),
+  ...(source.OTEL_EXPORTER_OTLP_HEADERS !== undefined
+    ? { OTEL_EXPORTER_OTLP_HEADERS: source.OTEL_EXPORTER_OTLP_HEADERS }
+    : {}),
+  ...(source.OTEL_SERVICE_NAME !== undefined
+    ? { OTEL_SERVICE_NAME: source.OTEL_SERVICE_NAME }
     : {})
 });

@@ -9,6 +9,7 @@ import {
   createCloudinaryIntegration,
   createMongoDbIntegration,
   createMongoRateLimiter,
+  createOpenTelemetryIntegration,
   createSocketIoIntegration
 } from "./integrations/index.js";
 import { createMongoWorkspaceStorage, createWorkspaceRepository, createWorkspaceService } from "./features/workspaces/index.js";
@@ -49,6 +50,7 @@ const logger = createLogger({
   level: config.logLevel,
   format: config.environment === "production" ? "json" : "pretty"
 });
+const telemetry = createOpenTelemetryIntegration(config.telemetry, logger);
 const database = createMongoDbIntegration({
   logger,
   uri: config.mongodbUri
@@ -149,6 +151,7 @@ const socketIo = createSocketIoIntegration({
   getIdentity: authentication.getIdentity,
   logger,
   adapterCollection: socketAdapterCollection,
+  telemetry: telemetry.socketIo,
   trustVercelForwardedFor: isVercelRuntime
 });
 const channelRealtime = createChannelRealtime({
@@ -159,9 +162,15 @@ const channelRealtime = createChannelRealtime({
     if (result.kind === "allowed") return "allowed";
     return result.kind === "unavailable" ? "unavailable" : "denied";
   },
-  logger
+  logger,
+  telemetry: telemetry.socketIo
 });
-const directMessageRealtime = createDirectMessageRealtime({ socketIo, service: directMessageService, logger });
+const directMessageRealtime = createDirectMessageRealtime({
+  socketIo,
+  service: directMessageService,
+  logger,
+  telemetry: telemetry.socketIo
+});
 const notificationService = createNotificationService({
   storage: createMongoNotificationStorage(mongoDatabase),
   createId: randomUUID,
@@ -175,7 +184,9 @@ const app = createApp({
   rateLimiter,
   trustVercelForwardedFor: isVercelRuntime,
   authentication,
+  ...(telemetry.middleware ? { apiTelemetryMiddleware: telemetry.middleware } : {}),
   ...(attachmentStorage ? { attachmentStorage } : {}),
+  ...(attachmentStorage ? { profileImageStorage: attachmentStorage } : {}),
   channelService,
   channelMessageService,
   channelRealtime,
@@ -190,7 +201,7 @@ socketIo.attach(server.raw);
 export default server.raw;
 
 if (!isVercelRuntime) {
-  const shutdown = createShutdown({ database, logger, server, socketIo });
+  const shutdown = createShutdown({ database, logger, server, socketIo, telemetry });
   await server.start();
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {

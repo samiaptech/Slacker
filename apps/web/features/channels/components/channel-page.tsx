@@ -7,6 +7,7 @@ import { ChannelMessages } from "./channel-messages";
 import { ChannelProfilePanel } from "./channel-profile-panel";
 import { useChannelProfileToggle } from "./channel-profile-toggle-context";
 import { useWorkspaceContext } from "@/features/workspace-foundation/public";
+import { fetchSharedGet } from "@/app/fetch-shared-get";
 
 type ChannelPageProps = Readonly<{ apiBaseUrl: string; channelId: string; view?: "conversation" | "about" }>;
 
@@ -24,7 +25,7 @@ export const ChannelPage = ({ apiBaseUrl, channelId, view = "conversation" }: Ch
       setErrorMessage(null);
       setIsLoading(true);
       try {
-        const response = await fetch(new URL(`/channels/${encodeURIComponent(channelId)}`, apiBaseUrl), {
+        const response = await fetchSharedGet(new URL(`/channels/${encodeURIComponent(channelId)}`, apiBaseUrl), {
           credentials: "include",
           cache: "no-store",
           headers: { "X-Workspace-Id": activeWorkspace.id },
@@ -46,7 +47,7 @@ export const ChannelPage = ({ apiBaseUrl, channelId, view = "conversation" }: Ch
         if (error instanceof DOMException && error.name === "AbortError") return;
         setErrorMessage("The channel could not be loaded. Check your connection and try again.");
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     };
     void loadChannel();
@@ -64,6 +65,7 @@ export const ChannelPage = ({ apiBaseUrl, channelId, view = "conversation" }: Ch
             </section>
           ) : (
             <ChannelMessages
+              key={channelId}
               apiBaseUrl={apiBaseUrl}
               canSend={false}
               channelId={channelId}
@@ -78,6 +80,7 @@ export const ChannelPage = ({ apiBaseUrl, channelId, view = "conversation" }: Ch
           </section>
         ) : channel && view === "conversation" ? (
           <ChannelMessages
+            key={channel.id}
             apiBaseUrl={apiBaseUrl}
             canSend={channel.lifecycleState === "active"}
             channelId={channel.id}

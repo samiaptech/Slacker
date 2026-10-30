@@ -13,6 +13,8 @@ export type ApiErrorCode =
   | "channel_membership_conflict"
   | "direct_message_storage_unavailable"
   | "chat_attachment_storage_unavailable"
+  | "profile_image_storage_unavailable"
+  | "profile_image_update_failed"
   | "message_delete_forbidden"
   | "message_delete_cleanup_failed"
   | "message_edit_forbidden"

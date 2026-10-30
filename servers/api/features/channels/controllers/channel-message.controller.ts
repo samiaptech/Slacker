@@ -2,7 +2,10 @@ import type { RequestHandler } from "express";
 import {
   MESSAGE_REACTION_EMOJI,
   type ChannelMessageResponse,
-  type MessageReactionToggleResponse
+  type MessageReactionToggleResponse,
+  type ChannelThreadReplyResponse,
+  type ChannelThreadResponse,
+  type ChannelThreadSummaryResponse
 } from "@workspace/types";
 import { z } from "zod";
 import { ERROR_CODES, ERROR_MESSAGES, HTTP_STATUS } from "../../../constants/index.js";
@@ -27,8 +30,8 @@ import { resolveChannelMemberAccess, sendChannelAccessError, type ChannelAccessD
 type ChannelMessageControllerDependencies = ChannelAccessDependencies & Readonly<{
   service: ChannelMessageService;
   attachmentStorage?: ChatAttachmentIntegration;
-  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageUpdated" | "publishMessageDeleted" | "publishMessageReactions">;
-  notifications?: Pick<NotificationService, "notifyChannelMessage" | "markResourceRead">;
+  realtime?: Pick<ChannelRealtimePublisher, "publishMessage" | "publishMessageUpdated" | "publishMessageDeleted" | "publishMessageReactions" | "publishThreadReply">;
+  notifications?: Pick<NotificationService, "notifyChannelMessage" | "notifyChannelThreadReply" | "markResourceRead" | "markThreadRead">;
 }>;
 
 const querySchema = z.object({
@@ -72,6 +75,12 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
   }
   if (!("sender" in message)) throw new Error("A channel history message is missing sender metadata.");
   const attachments = message.attachments ?? [];
+  const thread: ChannelThreadSummaryResponse | null = message.thread
+    ? {
+      replyCount: message.thread.replyCount,
+      lastReplyAt: message.thread.lastReplyAt.toISOString()
+    }
+    : null;
   return {
     id: message.id,
     channelId: message.channelId,
@@ -81,6 +90,8 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
     createdAt: message.createdAt.toISOString(),
     ...(message.editedAt !== undefined ? { editedAt: message.editedAt?.toISOString() ?? null } : {}),
     reactions: message.reactions,
+    threadRootId: message.threadRootId ?? null,
+    thread,
     ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -90,6 +101,12 @@ const toMessageResponse = (message: ChannelMessageWithSender): (ChannelMessageRe
     })) } : {}),
     sender: message.sender
   };
+};
+
+const toChannelMessageResponse = (message: ChannelMessageWithSender): ChannelMessageResponse => {
+  const response = toMessageResponse(message);
+  if (!("senderId" in response)) throw new Error("A channel message response is missing its sender.");
+  return response;
 };
 
 export const createToggleChannelMessageReactionController = (
@@ -307,6 +324,60 @@ export const createListChannelMessagesController = (
   }
 };
 
+export const createListChannelThreadRepliesController = (
+  { getIdentity, getWorkspaceAccess, service, notifications }: ChannelMessageControllerDependencies
+): RequestHandler => async (request, response, next): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const access = await resolveChannelMemberAccess(request, getIdentity, getWorkspaceAccess);
+    if (access.kind !== "allowed") {
+      sendChannelAccessError(access, next);
+      return;
+    }
+    const { channelId, messageId } = request.params;
+    if (typeof channelId !== "string" || !channelId
+      || typeof messageId !== "string" || !messageId) {
+      next(channelUnavailableError());
+      return;
+    }
+    if (!service.listThread) {
+      next(messageStorageError());
+      return;
+    }
+    const parsed = querySchema.parse(request.query);
+    const cursor = parsed.before === undefined ? null : decodeChannelMessageCursor(parsed.before);
+    if (cursor && !cursor.ok) {
+      next(createApplicationError({
+        code: ERROR_CODES.validation,
+        message: ERROR_MESSAGES.validation,
+        status: HTTP_STATUS.badRequest,
+        details: { field: "before", reason: "invalid_cursor" }
+      }));
+      return;
+    }
+    const result = await service.listThread(
+      access.access.workspace.id,
+      channelId,
+      access.access.user.id,
+      messageId,
+      Object.freeze({ pageSize: parsed.limit, before: cursor?.ok ? cursor.cursor : null })
+    );
+    if (result.kind !== "listed") {
+      next(result.kind === "unavailable" ? messageStorageError() : channelUnavailableError());
+      return;
+    }
+    await notifications?.markThreadRead(access.access.user.id, channelId, messageId);
+    const body: ChannelThreadResponse = {
+      root: toChannelMessageResponse(result.root),
+      replies: result.replies.map(toChannelMessageResponse),
+      nextCursor: result.nextCursor
+    };
+    response.status(HTTP_STATUS.ok).json(body);
+  } catch (error: unknown) {
+    next(normalizeNotificationFailure(error));
+  }
+};
+
 export const createDeleteChannelMessageController = (
   { getIdentity, getWorkspaceAccess, service, realtime }: ChannelMessageControllerDependencies
 ): RequestHandler => async (request, response, next): Promise<void> => {
@@ -407,8 +478,9 @@ export const createAuthorizeChannelMessageUploadController = (
   }
 };
 
-export const createSendChannelMessageController = (
-  { getIdentity, getWorkspaceAccess, service, realtime, notifications }: ChannelMessageControllerDependencies
+const createSendChannelMessageControllerForThread = (
+  { getIdentity, getWorkspaceAccess, service, realtime, notifications }: ChannelMessageControllerDependencies,
+  isThreadReply: boolean
 ): RequestHandler => async (request, response, next): Promise<void> => {
   response.setHeader("Cache-Control", "no-store");
   try {
@@ -419,6 +491,12 @@ export const createSendChannelMessageController = (
     }
     const channelId = request.params.channelId;
     if (typeof channelId !== "string" || channelId.length === 0) {
+      next(channelUnavailableError());
+      return;
+    }
+    const rootMessageParam = isThreadReply ? request.params.messageId : undefined;
+    const threadRootId = typeof rootMessageParam === "string" ? rootMessageParam : undefined;
+    if (isThreadReply && !threadRootId) {
       next(channelUnavailableError());
       return;
     }
@@ -473,25 +551,10 @@ export const createSendChannelMessageController = (
       access.access.user.id,
       parsed.data.text,
       files,
-      { name: access.access.user.name, image: access.access.user.image }
+      { name: access.access.user.name, image: access.access.user.image },
+      threadRootId
     );
-    if (result.kind !== "sent") {
-      if (result.kind === "attachment-unavailable") {
-        next(createApplicationError({
-          code: ERROR_CODES.chatAttachmentStorageUnavailable,
-          message: ERROR_MESSAGES.chatAttachmentStorageUnavailable,
-          status: HTTP_STATUS.serviceUnavailable
-        }));
-        return;
-      }
-      if (result.kind === "unavailable") {
-        next(messageStorageError());
-        return;
-      }
-      if (result.kind === "channel-unavailable") {
-        next(channelUnavailableError());
-        return;
-      }
+    if (result.kind === "invalid") {
       next(createApplicationError({
         code: ERROR_CODES.validation,
         message: ERROR_MESSAGES.validation,
@@ -504,25 +567,73 @@ export const createSendChannelMessageController = (
       }));
       return;
     }
-    const message = toMessageResponse(result.message);
+    if (result.kind === "attachment-unavailable") {
+      next(createApplicationError({
+        code: ERROR_CODES.chatAttachmentStorageUnavailable,
+        message: ERROR_MESSAGES.chatAttachmentStorageUnavailable,
+        status: HTTP_STATUS.serviceUnavailable
+      }));
+      return;
+    }
+    if (result.kind === "unavailable") {
+      next(messageStorageError());
+      return;
+    }
+    if (result.kind === "channel-unavailable" || result.kind === "root-not-found") {
+      next(channelUnavailableError());
+      return;
+    }
+    const message = toChannelMessageResponse(result.message);
+    const actor = { id: access.access.user.id, name: access.access.user.name };
+    if (threadRootId) {
+      const thread = result.thread;
+      if (!thread) throw new Error("A persisted channel thread reply is missing its updated summary.");
+      const threadResponse: ChannelThreadSummaryResponse = {
+        replyCount: thread.replyCount,
+        lastReplyAt: thread.lastReplyAt.toISOString()
+      };
+      await notifications?.notifyChannelThreadReply({
+        workspaceId: access.access.workspace.id,
+        channelId,
+        rootMessageId: threadRootId,
+        messageId: result.message.id,
+        actor,
+        text: result.message.text,
+        createdAt: result.message.createdAt
+      });
+      realtime?.publishThreadReply?.(
+        access.access.workspace.id,
+        channelId,
+        threadRootId,
+        message,
+        threadResponse
+      );
+      const body: ChannelThreadReplyResponse = { reply: message, thread: threadResponse };
+      response.status(HTTP_STATUS.created).json(body);
+      return;
+    }
     await notifications?.notifyChannelMessage({
       workspaceId: access.access.workspace.id,
       channelId,
       messageId: result.message.id,
-      actor: { id: access.access.user.id, name: access.access.user.name },
+      actor,
       text: result.message.text,
       createdAt: result.message.createdAt
     });
-    realtime?.publishMessage(
-      access.access.workspace.id,
-      channelId,
-      message as ChannelMessageResponse
-    );
+    realtime?.publishMessage(access.access.workspace.id, channelId, message);
     response.status(HTTP_STATUS.created).json(message);
   } catch (error: unknown) {
     next(normalizeNotificationFailure(error));
   }
 };
+
+export const createSendChannelMessageController = (
+  dependencies: ChannelMessageControllerDependencies
+): RequestHandler => createSendChannelMessageControllerForThread(dependencies, false);
+
+export const createSendChannelThreadReplyController = (
+  dependencies: ChannelMessageControllerDependencies
+): RequestHandler => createSendChannelMessageControllerForThread(dependencies, true);
 
 export const createDownloadChannelAttachmentController = (
   { getIdentity, getWorkspaceAccess, service, attachmentStorage }: ChannelMessageControllerDependencies
