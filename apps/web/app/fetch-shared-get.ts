@@ -2,6 +2,7 @@ type SharedGet = {
   controller: AbortController;
   subscribers: number;
   abortTimer: ReturnType<typeof setTimeout> | null;
+  settled: boolean;
   promise: Promise<Response>;
 };
 
@@ -22,10 +23,12 @@ export const fetchSharedGet = (input: string | URL, init: RequestInit = {}): Pro
   if (!shared) {
     const controller = new AbortController();
     const promise = fetch(input, { ...init, method: "GET", signal: controller.signal });
-    shared = { controller, promise, subscribers: 0, abortTimer: null };
-    pendingGets.set(key, shared);
+    const request: SharedGet = { controller, promise, subscribers: 0, abortTimer: null, settled: false };
+    shared = request;
+    pendingGets.set(key, request);
     void promise.finally(() => {
-      if (pendingGets.get(key) === shared) pendingGets.delete(key);
+      request.settled = true;
+      if (pendingGets.get(key) === request) pendingGets.delete(key);
     }).catch(() => undefined);
   }
   if (shared.abortTimer) clearTimeout(shared.abortTimer);
@@ -39,8 +42,10 @@ export const fetchSharedGet = (input: string | URL, init: RequestInit = {}): Pro
       active = false;
       init.signal?.removeEventListener("abort", onAbort);
       shared.subscribers -= 1;
-      if (shared.subscribers === 0 && !shared.controller.signal.aborted) {
-        shared.abortTimer = setTimeout(() => shared?.controller.abort(), 0);
+      if (shared.subscribers === 0 && !shared.settled && !shared.controller.signal.aborted) {
+        shared.abortTimer = setTimeout(() => {
+          if (shared?.subscribers === 0 && !shared.settled) shared.controller.abort();
+        }, 0);
       }
     };
     const onAbort = (): void => {

@@ -104,6 +104,14 @@ inspect ordering and `--json` when another tool needs stable output.
 
 Updated: 2026-10-30.
 
+- **Production workspace loading regression:** On `slacker-qdqs.vercel.app`, authenticated
+  `/workspaces` and `/workspace` calls return 200 with valid response shapes, but the page
+  remains on its loading skeleton. The cause is the shared GET helper aborting its underlying
+  request immediately after headers resolve, which can cancel response-body parsing; the
+  caller treats that `AbortError` as an effect cleanup and never leaves loading. The helper
+  now aborts only unsettled requests, with regression tests for readable response bodies and
+  cancellation of pending requests. Web tests pass (31), typecheck, focused ESLint, and diff
+  check pass. Fix is local and not deployed; production remains affected until redeploy.
 - **Grafana observability (P0 metrics slice):** The API exports opt-in HTTP request count,
   duration, route/status labels, and Socket.IO connection lifecycle, bounded event-category,
   and unexpected handler-failure metrics to Grafana Cloud over OTLP/HTTP. The combined
