@@ -116,8 +116,14 @@ Updated: 2026-10-31.
   values remain unchanged. The channel-history handler runs session/workspace checks,
   history and reaction reads in separate operations/transactions, user-profile reads, and
   notification read updates. These are investigation candidates, not a confirmed root cause;
-  no production stage timings or MongoDB query plan were available. Do not claim a backend
-  latency fix until production profiling isolates the expensive stage.
+  no production stage timings or MongoDB query plan were available. Channel message
+  notification upserts and unread-count reads previously ran serially per recipient before
+  the send response; both now run in bounded batches of eight while preserving durable
+  writes, idempotency, actor suppression, and error propagation. Focused notification tests,
+  API typecheck/lint/build, and diff checks pass. This reduces recipient-fanout round trips
+  but has not been measured against production traffic; API request-stage timing and a live
+  send benchmark remain outstanding. Treat this as a credible avoidable contributor, not
+  proof that the full four-second delay is fixed.
 - **Production workspace loading regression:** On `slacker-qdqs.vercel.app`, authenticated
   `/workspaces` and `/workspace` calls return 200 with valid response shapes, but the page
   remains on its loading skeleton. The cause is the shared GET helper aborting its underlying

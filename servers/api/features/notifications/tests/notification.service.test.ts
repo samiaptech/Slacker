@@ -4,7 +4,7 @@ import type { NotificationDocument } from "../model.js";
 import type { NotificationStorage } from "../storage.js";
 import { createNotificationService } from "../service.js";
 
-const createHarness = () => {
+const createHarness = (unreadCount?: NotificationStorage["unreadCount"]) => {
   const documents: NotificationDocument[] = [];
   const events: Readonly<Record<string, unknown>>[] = [];
   const threadReplyEvents: Readonly<Record<string, unknown>>[] = [];
@@ -73,8 +73,8 @@ const createHarness = () => {
       return Promise.resolve([item]);
     },
     listForUser: (userId) => Promise.resolve(documents.filter(({ recipientId }) => recipientId === userId)),
-    unreadCount: (userId) => Promise.resolve(documents.filter(({ recipientId, readAt }) =>
-      recipientId === userId && readAt === null).length),
+    unreadCount: unreadCount ?? ((userId) => Promise.resolve(documents.filter(({ recipientId, readAt }) =>
+      recipientId === userId && readAt === null).length)),
     markRead: (userId, notificationId, readAt) => {
       const existing = documents.find((item) => item._id === notificationId && item.recipientId === userId);
       if (!existing) return Promise.resolve(false);
@@ -119,6 +119,33 @@ const createHarness = () => {
   });
   return { service, documents, events, threadReplyEvents };
 };
+
+void test("publishes channel unread counts concurrently for separate recipients", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const { service, events } = createHarness(async () => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active -= 1;
+    return 1;
+  });
+
+  await service.notifyChannelMessage({
+    workspaceId: "workspace-1",
+    channelId: "channel-1",
+    messageId: "message-1",
+    actor: { id: "actor-1", name: "Actor" },
+    text: "hello",
+    createdAt: new Date("2026-10-26T09:00:00.000Z")
+  });
+
+  assert.equal(maximumActive, 2);
+  assert.deepEqual(events.filter(({ kind }) => kind === "count").map(({ userId }) => userId), [
+    "mention-1",
+    "member-2"
+  ]);
+});
 
 void test("persists channel notifications once, upgrades explicit mentions, and suppresses the actor", async () => {
   const { service, documents, events } = createHarness();

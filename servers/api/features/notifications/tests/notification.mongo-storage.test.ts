@@ -111,6 +111,51 @@ void test("initializes durable notification storage and deduplicates per recipie
   ]);
 });
 
+void test("writes channel notification recipients concurrently in bounded batches", async () => {
+  const members = Array.from({ length: 10 }, (_, index) => ({ userId: `member-${String(index)}` }));
+  let activeWrites = 0;
+  let maximumActiveWrites = 0;
+  const notificationCollection = {
+    indexes: () => Promise.resolve(NOTIFICATIONS_INDEXES.map((index) => ({
+      name: index.options.name,
+      key: index.keys,
+      unique: index.options.unique
+    }))),
+    updateOne: async () => {
+      activeWrites += 1;
+      maximumActiveWrites = Math.max(maximumActiveWrites, activeWrites);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeWrites -= 1;
+      return { upsertedCount: 1 };
+    }
+  };
+  const database = {
+    listCollections: () => ({
+      next: () => Promise.resolve({
+        name: NOTIFICATIONS_COLLECTION,
+        options: { validator: NOTIFICATIONS_COLLECTION_VALIDATOR }
+      })
+    }),
+    collection: (name: string) => name === NOTIFICATIONS_COLLECTION
+      ? notificationCollection
+      : { find: () => ({ toArray: () => Promise.resolve(members) }) }
+  } as unknown as MongoDatabase;
+  const storage = createMongoNotificationStorage(database);
+  const event = {
+    eventId: "message-1",
+    workspaceId: "workspace-1",
+    resource: { type: "channel" as const, id: "channel-1" },
+    type: "channel_message" as const,
+    actor: { id: "member-0", name: "Actor" },
+    createdAt: new Date("2026-10-26T09:00:00.000Z")
+  };
+
+  const created = await storage.createForChannel(event, []);
+
+  assert.equal(created.length, 9);
+  assert.equal(maximumActiveWrites, 8);
+});
+
 void test("notifies only thread participants and mentioned current members with their root ID", async () => {
   const documents: Record<string, unknown>[] = [];
   const members = [

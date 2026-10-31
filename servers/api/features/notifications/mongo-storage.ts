@@ -13,6 +13,7 @@ import type { NotificationEvent, NotificationStorage } from "./storage.js";
 const unavailable = Object.assign(new Error("Notification storage is unavailable."), {
   kind: "notification-storage-unavailable" as const
 });
+const NOTIFICATION_WRITE_CONCURRENCY = 8;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 const isCollectionExists = (error: unknown): boolean => isRecord(error) && error.code === 48;
@@ -74,32 +75,37 @@ export const createMongoNotificationStorage = (database: MongoDatabase): Notific
     mentionedUserIds: readonly string[] = []
   ): Promise<readonly NotificationDocument[]> => {
     const created: NotificationDocument[] = [];
-    for (const recipientId of new Set(recipientIds)) {
-      if (recipientId === event.actor.id) continue;
-      const notification: NotificationDocument = Object.freeze({
-        _id: `${event.eventId}:${recipientId}`,
-        eventId: event.eventId,
-        recipientId,
-        workspaceId: event.workspaceId,
-        type: mentionedUserIds.includes(recipientId) ? "mention" : event.type,
-        resourceType: event.resource.type,
-        resourceId: event.resource.id,
-        actorId: event.actor.id,
-        actorName: event.actor.name,
-        createdAt: event.createdAt,
-        readAt: null,
-        ...(event.threadRootId ? { threadRootId: event.threadRootId } : {})
-      });
-      try {
-        const result = await notifications.updateOne(
-          { recipientId, eventId: event.eventId },
-          { $setOnInsert: notification },
-          { upsert: true }
-        );
-        if (result.upsertedCount === 1) created.push(notification);
-      } catch (error: unknown) {
-        if (!isDuplicateKey(error)) throw error;
-      }
+    const recipients = [...new Set(recipientIds)].filter((recipientId) => recipientId !== event.actor.id);
+    for (let index = 0; index < recipients.length; index += NOTIFICATION_WRITE_CONCURRENCY) {
+      const batch = recipients.slice(index, index + NOTIFICATION_WRITE_CONCURRENCY);
+      const batchCreated = await Promise.all(batch.map(async (recipientId) => {
+        const notification: NotificationDocument = Object.freeze({
+          _id: `${event.eventId}:${recipientId}`,
+          eventId: event.eventId,
+          recipientId,
+          workspaceId: event.workspaceId,
+          type: mentionedUserIds.includes(recipientId) ? "mention" : event.type,
+          resourceType: event.resource.type,
+          resourceId: event.resource.id,
+          actorId: event.actor.id,
+          actorName: event.actor.name,
+          createdAt: event.createdAt,
+          readAt: null,
+          ...(event.threadRootId ? { threadRootId: event.threadRootId } : {})
+        });
+        try {
+          const result = await notifications.updateOne(
+            { recipientId, eventId: event.eventId },
+            { $setOnInsert: notification },
+            { upsert: true }
+          );
+          return result.upsertedCount === 1 ? notification : null;
+        } catch (error: unknown) {
+          if (!isDuplicateKey(error)) throw error;
+          return null;
+        }
+      }));
+      created.push(...batchCreated.filter((item): item is NotificationDocument => item !== null));
     }
     return Object.freeze(created);
   };

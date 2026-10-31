@@ -8,6 +8,7 @@ import type { NotificationEvent, NotificationStorage } from "./storage.js";
 
 export const NOTIFICATION_PAGE_SIZE_DEFAULT = 30;
 export const NOTIFICATION_PAGE_SIZE_MAX = 100;
+const NOTIFICATION_PUBLISH_CONCURRENCY = 8;
 export const isNotificationStorageUnavailable = (error: unknown): boolean =>
   typeof error === "object" && error !== null && "kind" in error
   && error.kind === "notification-storage-unavailable";
@@ -72,8 +73,16 @@ export const createNotificationService = ({
   const publish = async (documents: readonly NotificationDocument[]): Promise<void> => {
     const records = documents.map(toRecord);
     for (const record of records) realtime?.publishNew(record.recipientId, record);
-    for (const userId of new Set(records.map(({ recipientId }) => recipientId))) {
-      realtime?.publishUnreadCount(userId, await storage.unreadCount(userId));
+    const recipientIds = [...new Set(records.map(({ recipientId }) => recipientId))];
+    for (let index = 0; index < recipientIds.length; index += NOTIFICATION_PUBLISH_CONCURRENCY) {
+      const batch = recipientIds.slice(index, index + NOTIFICATION_PUBLISH_CONCURRENCY);
+      const counts = await Promise.all(batch.map(async (userId) => ({
+        userId,
+        unreadCount: await storage.unreadCount(userId)
+      })));
+      for (const { userId, unreadCount } of counts) {
+        realtime?.publishUnreadCount(userId, unreadCount);
+      }
     }
   };
   const createEvent = (
