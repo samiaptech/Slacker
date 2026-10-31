@@ -53,8 +53,14 @@ The existing application logs are not exported. Workspace/business activity, mes
 processing stages, MongoDB health/latency, and host/runtime metrics are not instrumented yet;
 the dashboard intentionally does not display placeholder values for them.
 
-The dashboard derives request throughput and 4xx/5xx rates from the HTTP counter. It derives
-API p95 latency from the HTTP duration histogram. Socket panels show active connections,
+HTTP request duration is measured in seconds and uses explicit histogram boundaries from
+0.5 ms through 60 seconds. The boundaries are configured in the API's OpenTelemetry view;
+they intentionally do not use the SDK's default numeric boundaries, which would make the
+first bucket five seconds wide for a seconds-valued instrument.
+
+The dashboard derives request throughput and 4xx/5xx rates from the HTTP counter. Its
+latency panel derives p90, p95, and p99 separately for each normalized HTTP route from the
+duration histogram. Socket panels show active connections,
 success/failure connection attempt rate, bounded incoming/outgoing event-category rates, and
 unexpected handler-failure rates. No acknowledgement or delivery metric is shown because the
 current realtime contract does not implement client delivery acknowledgements.

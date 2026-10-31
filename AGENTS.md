@@ -104,6 +104,15 @@ inspect ordering and `--json` when another tool needs stable output.
 
 Updated: 2026-10-30.
 
+- **HTTP latency histogram correction:** API request durations were recorded in seconds
+  using the OpenTelemetry SDK's default numeric histogram boundaries (0, 5, 10, ...),
+  making the first bucket five seconds wide and producing misleading percentiles such as
+  4.75 seconds. The API now applies explicit second-based buckets from 0.5 ms through
+  60 seconds. The Grafana overview dashboard now plots p90/p95/p99 per normalized route,
+  and the observability README documents the units and aggregation. API HTTP telemetry
+  tests (3), typecheck, lint, build, dashboard JSON validation, and `git diff --check` pass.
+  Changes are local and not deployed; redeploy the API and import/update the Grafana
+  dashboard to use new measurements. Historical percentile points cannot be corrected.
 - **Production workspace loading regression:** On `slacker-qdqs.vercel.app`, authenticated
   `/workspaces` and `/workspace` calls return 200 with valid response shapes, but the page
   remains on its loading skeleton. The cause is the shared GET helper aborting its underlying

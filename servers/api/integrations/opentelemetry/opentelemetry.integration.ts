@@ -10,7 +10,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { RequestHandler } from "express";
 import type { Logger } from "@workspace/logging";
 import type { SocketIoTelemetry } from "../socket-io/index.js";
-import { createApiHttpTelemetryMiddleware } from "./http-telemetry.js";
+import { createApiHttpTelemetryMiddleware, createApiHttpTelemetryViews } from "./http-telemetry.js";
 import { createSocketIoTelemetry } from "./socket-telemetry.js";
 import { getOtlpSignalUrl, parseOtlpHeaders } from "./headers.js";
 
@@ -74,6 +74,7 @@ export const createOpenTelemetryIntegration = (
       "service.name": configuration.serviceName,
       "service.instance.id": randomUUID()
     }),
+    views: createApiHttpTelemetryViews(),
     readers: [metricReader]
   });
   const meter = meterProvider.getMeter("teamnest-api");

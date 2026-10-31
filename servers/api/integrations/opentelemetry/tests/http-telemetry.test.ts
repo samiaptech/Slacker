@@ -8,9 +8,27 @@ import {
   MeterProvider,
   PeriodicExportingMetricReader
 } from "@opentelemetry/sdk-metrics";
-import { createApiHttpTelemetryMiddleware, getApiHttpAttributes } from "../http-telemetry.js";
+import {
+  createApiHttpTelemetryMiddleware,
+  createApiHttpTelemetryViews,
+  getApiHttpAttributes
+} from "../http-telemetry.js";
 
 type TestMetricPoint = Readonly<{ attributes: Attributes; value: unknown }>;
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
+
+const isNumberArray = (value: unknown): value is readonly number[] =>
+  Array.isArray(value) && value.every((item: unknown) => typeof item === "number");
+
+const getHistogramBoundaries = (value: unknown): readonly number[] => {
+  if (!isRecord(value) || !isRecord(value.buckets) || !isNumberArray(value.buckets.boundaries)) {
+    throw new Error("Expected an explicit-bucket histogram value.");
+  }
+  return value.buckets.boundaries;
+};
 
 const getMetricPoints = (
   exporter: InMemoryMetricExporter,
@@ -52,6 +70,7 @@ void test("uses bounded fallback values for unknown routes and methods", () => {
 void test("records failed HTTP requests using only the normalized route template", async () => {
   const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
   const provider = new MeterProvider({
+    views: createApiHttpTelemetryViews(),
     readers: [new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60_000 })]
   });
   const middleware = createApiHttpTelemetryMiddleware(provider.getMeter("http-test"));
@@ -77,6 +96,10 @@ void test("records failed HTTP requests using only the normalized route template
     const duration = durations[0]?.value;
     assert.ok(typeof duration === "object" && duration !== null && "count" in duration);
     assert.equal(duration.count, 1);
+    assert.deepEqual(getHistogramBoundaries(duration), [
+      0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.1,
+      0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 15, 30, 60
+    ]);
   } finally {
     await provider.shutdown();
   }
