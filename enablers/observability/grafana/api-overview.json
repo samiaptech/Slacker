@@ -452,6 +452,49 @@
       ],
       "title": "HTTP 4xx response rate",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (http_route) (increase(teamnest_http_requests_total[$__range]))",
+          "legendFormat": "{{http_route}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP request count by route (selected range)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

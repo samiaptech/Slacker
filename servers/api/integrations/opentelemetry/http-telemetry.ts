@@ -5,7 +5,9 @@ import type { NextFunction, Request } from "express";
 const knownMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const requestDurationBoundariesSeconds = [
   0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.1,
-  0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 15, 30, 60
+  0.25, 0.5, 0.75, 1, 2.5,
+  2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5,
+  7.5, 10, 15, 30, 60
 ];
 type ApiHttpRequest = Readonly<{ method: string; route?: unknown }>;
 type ApiHttpTelemetryResponse = Readonly<{

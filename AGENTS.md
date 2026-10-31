@@ -102,17 +102,22 @@ inspect ordering and `--json` when another tool needs stable output.
 
 ## Current handoff
 
-Updated: 2026-10-30.
+Updated: 2026-10-31.
 
 - **HTTP latency histogram correction:** API request durations were recorded in seconds
   using the OpenTelemetry SDK's default numeric histogram boundaries (0, 5, 10, ...),
   making the first bucket five seconds wide and producing misleading percentiles such as
   4.75 seconds. The API now applies explicit second-based buckets from 0.5 ms through
-  60 seconds. The Grafana overview dashboard now plots p90/p95/p99 per normalized route,
-  and the observability README documents the units and aggregation. API HTTP telemetry
-  tests (3), typecheck, lint, build, dashboard JSON validation, and `git diff --check` pass.
-  Changes are local and not deployed; redeploy the API and import/update the Grafana
-  dashboard to use new measurements. Historical percentile points cannot be corrected.
+  60 seconds, including 250 ms increments from 2.5 through 5 seconds. The Grafana overview
+  dashboard plots p90/p95/p99 per normalized route and includes request counts over the
+  selected range. API HTTP telemetry tests (3), typecheck, focused lint, build, dashboard
+  JSON validation, and `git diff --check` pass. Further bucket/dashboard updates are local:
+  deploy the API and import the dashboard JSON before evaluating new percentiles. Historical
+  values remain unchanged. The channel-history handler runs session/workspace checks,
+  history and reaction reads in separate operations/transactions, user-profile reads, and
+  notification read updates. These are investigation candidates, not a confirmed root cause;
+  no production stage timings or MongoDB query plan were available. Do not claim a backend
+  latency fix until production profiling isolates the expensive stage.
 - **Production workspace loading regression:** On `slacker-qdqs.vercel.app`, authenticated
   `/workspaces` and `/workspace` calls return 200 with valid response shapes, but the page
   remains on its loading skeleton. The cause is the shared GET helper aborting its underlying
